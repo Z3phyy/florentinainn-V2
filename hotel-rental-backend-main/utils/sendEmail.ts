@@ -310,3 +310,113 @@ export const sendContactInquiryEmail = async ({
     }),
   ]);
 };
+
+export interface ReservationVoucherEmailInput {
+  to: string;
+  guestName: string;
+  bookingId: string;
+  voucherUrl: string;
+  amount: number;
+  roomCategory?: string;
+  arrivalDate?: string;
+  arrivalTime?: string;
+  departureDate?: string;
+  refNumber?: string;
+}
+
+export const sendReservationVoucherEmail = async ({
+  to,
+  guestName,
+  bookingId,
+  voucherUrl,
+  amount,
+  roomCategory,
+  arrivalDate,
+  arrivalTime,
+  departureDate,
+  refNumber,
+}: ReservationVoucherEmailInput) => {
+  const formatDate = (dateStr?: string) =>
+    dateStr
+      ? new Date(dateStr).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      : "—";
+
+  const htmlContent = `
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Reservation Payment Confirmation - Florentina Inn</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#FAF5F5; font-family:'Segoe UI', Arial, sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAF5F5; padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table width="100%" cellpadding="0" cellspacing="0" style="max-width:580px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 16px rgba(144,5,70,0.06); border:1px solid #E4D1D1;">
+            <tr>
+              <td align="center" style="background-color:#900546; padding:32px 24px;">
+                <div style="font-size:24px; font-weight:700; color:#ffffff; font-family:Georgia, serif;">Florentina Inn</div>
+                <div style="font-size:12px; color:#F2E3E3; margin-top:4px;">Jose D. Aspiras Hwy, Tubao, 2506 La Union</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                <h2 style="margin:0 0 8px 0; font-size:20px; color:#130005;">Payment Received — Thank you, ${guestName}!</h2>
+                <p style="margin:0 0 20px 0; font-size:14px; line-height:1.6; color:#5C454B;">
+                  Your online reservation payment has been confirmed. Your booking is now secured. Please present your
+                  payment voucher at the front desk upon arrival.
+                </p>
+
+                <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAF5F5; border:1px solid #E4D1D1; border-radius:12px; padding:16px;">
+                  <tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Booking Reference</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${refNumber || `RSV-${bookingId.slice(-6).toUpperCase()}`}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Room</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${roomCategory || "Standard Suite"}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Check-In</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${formatDate(arrivalDate)}${arrivalTime ? ` · ${arrivalTime}` : ""}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Check-Out</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${formatDate(departureDate)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Amount Paid</td>
+                    <td style="padding:6px 12px; font-size:14px; font-weight:bold; color:#900546; text-align:right;">₱${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>
+                </table>
+
+                <div align="center" style="margin:28px 0 20px 0;">
+                  <a href="${voucherUrl}" style="display:inline-block; padding:14px 32px; background-color:#900546; color:#ffffff; text-decoration:none; font-size:14px; font-weight:bold; border-radius:12px;">
+                    View / Print Payment Voucher
+                  </a>
+                </div>
+
+                <div style="background-color:#F5FAFA; border:1px solid #618685; padding:14px; border-radius:10px; font-size:12px; color:#385251;">
+                  <strong>Need help?</strong> Call our 24/7 Front Desk at <strong>0917-123-4567</strong> or chat with us on the website.
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px; background-color:#FAF5F5; border-top:1px solid #E4D1D1; font-size:11px; color:#886F75; text-align:center;">
+                Florentina Inn • Tubao, 2506 La Union, Philippines • 24/7 Front Desk Reception
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `Florentina Inn - Reservation Payment Confirmed (Ref: ${refNumber || `RSV-${bookingId.slice(-6).toUpperCase()}`})`,
+    htmlContent,
+  });
+};

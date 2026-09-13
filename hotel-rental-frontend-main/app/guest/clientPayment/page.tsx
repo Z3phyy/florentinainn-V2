@@ -104,8 +104,6 @@ function PaymentSuccessContent() {
   });
 
   const total = Number(amount || bookingInfo?.room?.price || 0);
-  const tax = total * 0.12; // 12% VAT
-  const subTotal = Math.max(0, total - tax);
 
   const hotelName = systemInfo?.systemName || "Florentina Inn";
   const logoUrl = systemInfo?.logo || "/Florentina Inn Logo.png";
@@ -357,12 +355,8 @@ function PaymentSuccessContent() {
               {/* Financial Breakdown Table */}
               <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-2 text-xs">
                 <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
-                  <span>Room Reservation Rate (Net)</span>
-                  <span className="font-medium text-[#130005] dark:text-white">₱{subTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
-                  <span>Standard VAT / Service Fees (12%)</span>
-                  <span className="font-medium text-[#130005] dark:text-white">₱{tax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>Room Reservation Rate</span>
+                  <span className="font-medium text-[#130005] dark:text-white">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="h-px bg-[#D9C3C3] dark:bg-white/10 my-1" />
                 <div className="flex items-center justify-between text-sm font-bold text-[#130005] dark:text-white">
@@ -379,29 +373,6 @@ function PaymentSuccessContent() {
                 <p>
                   • Airconditioned rooms • Hot & cold shower • Cable TV / DVD • Free WiFi internet • We serve Breakfast • Private Parking • Backup generator
                 </p>
-              </div>
-
-              {/* Barcode Footer for Front-Desk Scan */}
-              <div className="pt-4 border-t border-[#D9C3C3] dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-                <div>
-                  <p className="font-mono text-[10px] text-[#5C454B] dark:text-gray-400">
-                    SCAN OR VERIFY AT RECEPTION
-                  </p>
-                  <p className="font-mono text-xs font-bold text-[#130005] dark:text-white">
-                    *FLORENTINA-{bookingId?.slice(-6).toUpperCase() || "CONFIRMED"}*
-                  </p>
-                </div>
-
-                {/* Simulated Barcode visual */}
-                <div className="h-9 w-40 flex items-center justify-center gap-0.5 bg-white p-1 rounded-sm border border-[#D9C3C3]">
-                  {[3, 1, 2, 4, 1, 3, 2, 1, 4, 2, 1, 3, 2, 4, 1, 2, 3, 1, 2].map((w, i) => (
-                    <span
-                      key={i}
-                      className="bg-[#130005] h-full"
-                      style={{ width: `${w * 1.5}px` }}
-                    />
-                  ))}
-                </div>
               </div>
             </div>
           </div>

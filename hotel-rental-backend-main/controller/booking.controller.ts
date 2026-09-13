@@ -8,6 +8,7 @@ import { SystemService } from "../services/system.service";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { verifyOnlinePayment } from "../utils/verifyPayment";
+import { sendReservationVoucherEmail } from "../utils/sendEmail";
 import { localDateStr } from "../utils/date";
 
 
@@ -602,6 +603,34 @@ export class BookingController {
         targetType: "booking",
         targetId: bookingId,
       });
+
+      // Email the guest their printable payment voucher so it can be reopened
+      // from their inbox without keeping the browser tab open.
+      if (booking.clientEmail) {
+        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+        const voucherUrl = `${frontendUrl}/guest/clientPayment?bookingId=${bookingId}&amount=${paidAmount}&gateway=${gateway || "paymongo"}&session_id=${sessionId}`;
+        const roomCategory =
+          booking.room && typeof booking.room === "object"
+            ? (booking.room as { category?: string }).category
+            : undefined;
+
+        try {
+          await sendReservationVoucherEmail({
+            to: booking.clientEmail,
+            guestName: booking.clientName,
+            bookingId: String(bookingId),
+            voucherUrl,
+            amount: paidAmount,
+            roomCategory,
+            arrivalDate: booking.arrivalDate,
+            arrivalTime: booking.arrivalTime,
+            departureDate: booking.departureDate,
+            refNumber: generatedRef,
+          });
+        } catch (emailError) {
+          console.log("Voucher email failed: " + (emailError as Error).message);
+        }
+      }
 
       response.send("success")
 

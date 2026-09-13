@@ -291,6 +291,24 @@ export default function Page() {
                   </div>
 
                   <div>
+                    <Label htmlFor="paymentMin" className="text-xs font-bold text-[#130005] dark:text-white">
+                      Minimum Online Reservation Payment
+                    </Label>
+                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
+                      Amount guests pay upfront (Stripe / PayMongo) to confirm an online reservation. Defaults to ₱1,000.
+                    </p>
+                    <Input
+                      id="paymentMin"
+                      type="number"
+                      min={0}
+                      value={paymentMin}
+                      onChange={(e) => setPaymentMin(e.target.value)}
+                      placeholder="1000"
+                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                    />
+                  </div>
+
+                  <div>
                     <Label htmlFor="description" className="text-xs font-bold text-[#130005] dark:text-white">Description</Label>
                     <Textarea
                       id="description"
