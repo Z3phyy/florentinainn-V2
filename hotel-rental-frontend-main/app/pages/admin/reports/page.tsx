@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
+import { formatTime12hr } from "@/app/utils/customFunction";
 import { roomInterface } from "@/app/types/room.type";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { paymentInterface } from "@/app/types/payment.type";
@@ -451,7 +452,7 @@ function ReservationReportContent({
                     day: "numeric",
                   })}
                 </td>
-                <td className="px-4 py-2.5 font-mono text-xs">{b.arrivalTime}</td>
+                <td className="px-4 py-2.5">{formatTime12hr(b.arrivalTime)}</td>
                 <td className="px-4 py-2.5">
                   <span
                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${statusBg}`}
@@ -911,7 +912,7 @@ export default function Page() {
       const addr = `"${(b.clientAddress || "").replace(/"/g, '""')}"`;
       const cat = `"${(b.room?.category || "Room").replace(/"/g, '""')}"`;
       const arrDate = b.arrivalDate ? new Date(b.arrivalDate).toLocaleDateString("en-PH") : "";
-      const arrTime = `"${b.arrivalTime || ""}"`;
+      const arrTime = `"${formatTime12hr(b.arrivalTime) || ""}"`;
       const status = `"${b.status || ""}"`;
       return `${i + 1},${id},${name},${addr},${cat},"${arrDate}",${arrTime},${status}`;
     });

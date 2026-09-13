@@ -34,10 +34,13 @@ route.get("/notifications/staff/stream", attachTokenFromQuery, authenticateJWT, 
 route.put("/notifications/read-all", adminAuth, SystemController.markAllNotificationsRead)
 route.put("/notifications/staff/read-all", authenticateJWT, SystemController.markAllStaffNotificationsRead)
 route.put("/notifications/:id/read", adminAuth, SystemController.markNotificationAsRead)
-route.delete("/notifications/:id", adminAuth, SystemController.deleteNotification)
+// Note: literal staff routes must be declared BEFORE the generic "/:id" routes,
+// otherwise DELETE /notifications/staff is captured by /notifications/:id and rejected
+// by adminAuth (403), breaking "Clear Alerts" for staff.
+route.delete("/notifications/staff", authenticateJWT, SystemController.clearStaffNotifications)
 route.delete("/notifications/staff/:id", authenticateJWT, SystemController.deleteStaffNotification)
 route.delete("/notifications", adminAuth, SystemController.clearNotifications)
-route.delete("/notifications/staff", authenticateJWT, SystemController.clearStaffNotifications)
+route.delete("/notifications/:id", adminAuth, SystemController.deleteNotification)
 
 route.get("/chat", authenticateJWT, SystemController.getAllChats)
 route.get("/chat/:id", SystemController.getChat)

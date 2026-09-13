@@ -52,8 +52,8 @@ export class SystemController {
 
    static updateSystemInfo = async (request: AuthRequest, response: Response) => {
     try {
-      const { systemInfo, paymentMin, systemName, header, description, facebook, contactEmail } = request.body
-      const system = await SystemService.update({ systemInfo, paymentMin, systemName, header, description, facebook, contactEmail })
+      const { systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail } = request.body
+      const system = await SystemService.update({ systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail })
       response.send(system)
     } catch (error) {
       console.log("Failed to update system info: " + (error as Error).message)
@@ -943,6 +943,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       const todayStr = `${yyyy}-${mm}-${dd}`;
 
       const bookings = await BookingService.getTodayArrivals(todayStr);
+      const seen = new Set<string>();
 
       for (const booking of bookings) {
         const bookingId = String(booking._id);
@@ -955,6 +956,15 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
           await BookingService.markArrivalNotified(bookingId);
           continue;
         }
+
+        // Duplicate bookings for the same guest (same phone/name, same date & time)
+        // must produce only ONE "Arrival Today" alert.
+        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${todayStr}|${booking.arrivalTime}`;
+        if (seen.has(guestKey)) {
+          await BookingService.markArrivalNotified(bookingId);
+          continue;
+        }
+        seen.add(guestKey);
 
         await notify({
           type: "reservation",
@@ -984,6 +994,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       const todayStr = `${yyyy}-${mm}-${dd}`;
 
       const bookings = await BookingService.getOverdueReservations(todayStr);
+      const seen = new Set<string>();
 
       for (const booking of bookings) {
         const bookingId = String(booking._id);
@@ -996,6 +1007,13 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
           await BookingService.markOverdueNotified(bookingId);
           continue;
         }
+
+        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${booking.arrivalDate}|${booking.arrivalTime}`;
+        if (seen.has(guestKey)) {
+          await BookingService.markOverdueNotified(bookingId);
+          continue;
+        }
+        seen.add(guestKey);
 
         await notify({
           type: "reservation",

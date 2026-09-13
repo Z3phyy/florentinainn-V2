@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
-import { getDaysFromDate } from "@/app/utils/customFunction";
+import { getDaysFromDate, formatTime12hr } from "@/app/utils/customFunction";
 import { CheckinModal } from "./components/checkinModal";
 import { Loader2, Bed, CalendarDays, User, Hash, Sparkles, Mail, Phone, Coins } from "lucide-react";
 import { CheckoutModal } from "./components/checkoutmodal";
@@ -148,7 +148,7 @@ export default function Page() {
                       <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
                         <Hash className="size-3.5 text-[#618685] shrink-0" />
                         <span className="capitalize">
-                          {booking.arrivalTime || "Flexible"} · {booking.type}
+                          {formatTime12hr(booking.arrivalTime)} · {booking.type}
                         </span>
                       </div>
                       {booking.clientEmail && (

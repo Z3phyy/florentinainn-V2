@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
+import { formatTime12hr } from "@/app/utils/customFunction";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { roomInterface } from "@/app/types/room.type";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -262,7 +263,7 @@ export function AvailabilityCalendar() {
     const color = isCheckedIn ? "#618685" : isDeparted ? "#9e938f" : STATUS_COLORS[status] || "#900546";
     const label = isCheckedIn ? "IN" : isDeparted ? "OUT" : "RSV";
     const guestFirst = statusBooking.clientName?.split(" ")[0] || "Guest";
-    const title = `${relevant.map((b) => `${b.clientName} (${b.status})`).join(", ")}\nArrival: ${key} ${statusBooking.arrivalTime}`;
+    const title = `${relevant.map((b) => `${b.clientName} (${b.status})`).join(", ")}\nArrival: ${key} ${formatTime12hr(statusBooking.arrivalTime)}`;
 
     return (
       <div
@@ -270,7 +271,7 @@ export function AvailabilityCalendar() {
         style={{ backgroundColor: color }}
         title={title}
       >
-        <span>{`${label}${statusBooking.arrivalTime && !isDeparted ? ` ${statusBooking.arrivalTime}` : ""}`}</span>
+        <span>{`${label}${statusBooking.arrivalTime && !isDeparted ? ` ${formatTime12hr(statusBooking.arrivalTime)}` : ""}`}</span>
         <span className="hidden xl:inline">{` ${guestFirst.slice(0, 3)}`}</span>
       </div>
     );

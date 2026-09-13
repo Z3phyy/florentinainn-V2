@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
-import { getDaysFromDate } from "@/app/utils/customFunction";
+import { getDaysFromDate, formatTime12hr } from "@/app/utils/customFunction";
 import { successAlert, errorAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -316,7 +316,7 @@ export function CheckoutModal({ booking }: Props) {
                     </div>
                     <div className="flex items-center gap-2">
                       <Clock className="size-3.5 text-muted-foreground shrink-0" />
-                      <span>{booking.arrivalTime}</span>
+                      <span>{formatTime12hr(booking.arrivalTime)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Wallet className="size-3.5 text-muted-foreground shrink-0" />

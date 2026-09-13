@@ -27,6 +27,7 @@ export default function Page() {
 
   const [systemInfoField, setSystemInfoField] = useState("");
   const [paymentMin, setPaymentMin] = useState("");
+  const [gracePeriodHours, setGracePeriodHours] = useState("");
   const [systemName, setSystemName] = useState("");
   const [header, setHeader] = useState("");
   const [description, setDescription] = useState("");
@@ -38,6 +39,7 @@ export default function Page() {
     if (systemInfo) {
       setSystemInfoField(systemInfo.systemInfo || "");
       setPaymentMin(systemInfo.paymentMin?.toString() || "");
+      setGracePeriodHours(systemInfo.gracePeriodHours?.toString() || "2");
       setSystemName(systemInfo.systemName || "");
       setHeader(systemInfo.header || "");
       setDescription(systemInfo.description || "");
@@ -50,6 +52,7 @@ export default function Page() {
     mutationFn: (data: {
       systemInfo: string;
       paymentMin: number;
+      gracePeriodHours: number;
       systemName: string;
       header: string;
       description: string;
@@ -77,6 +80,7 @@ export default function Page() {
     updateMutation.mutate({
       systemInfo: systemInfoField,
       paymentMin: Number(paymentMin) || 0,
+      gracePeriodHours: Number(gracePeriodHours) || 2,
       systemName,
       header,
       description,
@@ -88,6 +92,7 @@ export default function Page() {
   const hasChanges =
     systemInfoField !== (systemInfo?.systemInfo ?? "") ||
     paymentMin !== (systemInfo?.paymentMin?.toString() ?? "") ||
+    gracePeriodHours !== (systemInfo?.gracePeriodHours?.toString() ?? "") ||
     systemName !== (systemInfo?.systemName ?? "") ||
     header !== (systemInfo?.header ?? "") ||
     description !== (systemInfo?.description ?? "") ||
@@ -304,6 +309,25 @@ export default function Page() {
                       value={paymentMin}
                       onChange={(e) => setPaymentMin(e.target.value)}
                       placeholder="1000"
+                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="gracePeriodHours" className="text-xs font-bold text-[#130005] dark:text-white">
+                      Reservation Grace Period (hours)
+                    </Label>
+                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
+                      How long a guest can arrive late (past the expected arrival time) before the reservation is marked OVERDUE and an overdue alert is sent. Defaults to 2.
+                    </p>
+                    <Input
+                      id="gracePeriodHours"
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={gracePeriodHours}
+                      onChange={(e) => setGracePeriodHours(e.target.value)}
+                      placeholder="2"
                       className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
                     />
                   </div>

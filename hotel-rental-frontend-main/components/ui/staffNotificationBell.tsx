@@ -197,11 +197,11 @@ export function StaffNotificationBell() {
                       e.stopPropagation();
                       deleteNotification(item.id);
                     }}
-                    className="absolute top-2.5 right-2.5 p-1 rounded-lg text-[#5C454B]/50 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+                    className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-white dark:bg-[#1A0E13] border border-[#D9C3C3]/70 dark:border-white/15 text-[#5C454B] dark:text-gray-300 shadow-sm hover:text-rose-600 hover:border-rose-300 dark:hover:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer z-10"
                     aria-label="Dismiss notification"
                     title="Dismiss alert"
                   >
-                    <X className="size-3.5" />
+                    <X className="size-3" />
                   </button>
                 </div>
               ))

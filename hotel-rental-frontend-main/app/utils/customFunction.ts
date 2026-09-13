@@ -1,3 +1,5 @@
+import axiosInstance from "@/app/utils/axios";
+
 export function getDaysFromDate(dateString: string): number {
   // Parse date as local time to match new Date() behavior
   const [y, m, d] = dateString.split("-").map(Number);
@@ -12,6 +14,30 @@ export function getDaysFromDate(dateString: string): number {
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
   return Math.max(0, days);
+}
+
+// Converts a 24-hour "HH:MM" service string to a 12-hour AM/PM label (Philippines style)
+export function formatTime12hr(timeStr?: string | null): string {
+  if (!timeStr) return "Flexible";
+
+  const [hStr, mStr] = timeStr.split(":");
+  const hour = Number(hStr);
+  const minute = Number(mStr || 0);
+
+  if (isNaN(hour) || isNaN(minute)) return timeStr;
+
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+// Checks whether an email is available for registration (staff or admin account)
+export async function checkEmailAvailability(
+  email: string
+): Promise<{ available: boolean; takenBy: "staff" | "admin" | null }> {
+  const { data } = await axiosInstance.get(`/account/check-email/${encodeURIComponent(email.trim())}`);
+  return data as { available: boolean; takenBy: "staff" | "admin" | null };
 }
 
 // Returns true if the last message in a conversation is from the client (needs a staff reply)

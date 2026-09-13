@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { validatePassword, validateEmail } from "@/app/utils/validation";
+import { checkEmailAvailability } from "@/app/utils/customFunction";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
 
 export default function Page() {
@@ -41,7 +42,7 @@ export default function Page() {
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!name || !email || !password || !confirmPassword) {
@@ -63,6 +64,12 @@ export default function Page() {
 
     if (password !== confirmPassword) {
       errorAlert("Passwords do not match.");
+      return;
+    }
+
+    const availability = await checkEmailAvailability(email);
+    if (!availability.available) {
+      errorAlert("Email already exists. Registration is blocked — please use a different email address.");
       return;
     }
 

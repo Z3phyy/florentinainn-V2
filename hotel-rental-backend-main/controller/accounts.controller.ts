@@ -72,6 +72,29 @@ export class AccountController {
     response.send(account)
   }
 
+static checkEmailAvailability = async (request: AuthRequest, response: Response) => {
+    const email = (request.params.email || "").toLowerCase().trim();
+
+    if (!email) {
+      response.status(400).send("Email is required")
+      return
+    }
+
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      response.status(400).send(emailErr);
+      return;
+    }
+
+    const isStaff = !!(await AccountService.checkEmail(email));
+    const isAdmin = !!(await AdminService.getByEmail(email));
+
+    response.send({
+      available: !isStaff && !isAdmin,
+      takenBy: isAdmin ? "admin" : isStaff ? "staff" : null,
+    })
+  }
+
 static login = async (request: AuthRequest, response: Response) => {
   try {
     const { email, password } = request.body;

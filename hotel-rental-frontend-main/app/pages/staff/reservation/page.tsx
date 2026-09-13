@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
+import { systemInterface } from "@/app/types/system.type";
 import {
   Loader2,
   Bed,
@@ -19,9 +20,18 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { confirmAlert } from "@/app/utils/alert";
+import { formatTime12hr } from "@/app/utils/customFunction";
 
 export default function Page() {
   const queryClient = useQueryClient();
+
+  const { data: systemInfo } = useQuery<systemInterface>({
+    queryKey: ["systeminfo"],
+    queryFn: async () => {
+      const res = await axiosInstance.get("/system");
+      return res.data;
+    },
+  });
 
   const { data: bookings, isLoading } = useQuery<bookingInterface[]>({
     queryKey: ["reservation-bookings"],
@@ -104,6 +114,7 @@ export default function Page() {
               onCancel={(id) => cancelMutation.mutate(id)}
               isActivating={activateMutation.isPending}
               isCanceling={cancelMutation.isPending}
+              gracePeriodHours={systemInfo?.gracePeriodHours}
             />
           ))}
         </div>
@@ -120,49 +131,68 @@ function ReservationCard({
   onCancel,
   isActivating,
   isCanceling,
+  gracePeriodHours,
 }: {
   booking: bookingInterface;
   onActivate: (id: string) => void;
   onCancel: (id: string) => void;
   isActivating: boolean;
   isCanceling: boolean;
+  gracePeriodHours?: number;
 }) {
-  const [timeRemaining, setTimeRemaining] = useState<string>("");
-  const [isLate, setIsLate] = useState(false);
+  const graceHrs = gracePeriodHours ?? 2;
+  const [timeRemaining, setTimeRemaining] = useState<string>("");  const [isLate, setIsLate] = useState(false);
   const [isToday, setIsToday] = useState(false);
+  const [timerVariant, setTimerVariant] = useState<"arriving" | "grace" | null>(null);
+
+  const fmtDuration = (ms: number): string => {
+    if (ms <= 0) return "0s";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m ${s.toString().padStart(2, "0")}s`;
+    if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
+    return `${s}s`;
+  };
 
   useEffect(() => {
     const updateTimer = () => {
       const now = new Date();
       const [hours, minutes] = (booking.arrivalTime || "14:00").split(":").map(Number);
-      const arrivalDate = new Date(booking.arrivalDate);
-      arrivalDate.setHours(hours || 14, minutes || 0, 0, 0);
+      const arrivalMs = new Date(booking.arrivalDate).setHours(hours || 14, minutes || 0, 0, 0);
 
       const today = new Date();
       const isArrivalToday =
-        arrivalDate.getFullYear() === today.getFullYear() &&
-        arrivalDate.getMonth() === today.getMonth() &&
-        arrivalDate.getDate() === today.getDate();
+        arrivalMs > 0 &&
+        new Date(arrivalMs).getFullYear() === today.getFullYear() &&
+        new Date(arrivalMs).getMonth() === today.getMonth() &&
+        new Date(arrivalMs).getDate() === today.getDate();
 
       setIsToday(isArrivalToday);
 
-      const deadlineMs = arrivalDate.getTime() + 2 * 60 * 60 * 1000;
-      const diffMs = deadlineMs - now.getTime();
+      const nowMs = now.getTime();
+      const deadlineMs = arrivalMs + graceHrs * 60 * 60 * 1000;
 
-      if (diffMs <= 0) {
-        setIsLate(true);
-        setTimeRemaining("LATE");
-      } else if (isArrivalToday) {
-        setIsLate(false);
-        const h = Math.floor(diffMs / (1000 * 60 * 60));
-        const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        const s = Math.floor((diffMs % (1000 * 60)) / 1000);
-        setTimeRemaining(
-          `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
-        );
-      } else {
+      if (!isArrivalToday) {
         setTimeRemaining("");
         setIsLate(false);
+        setTimerVariant(null);
+        return;
+      }
+
+      if (nowMs < arrivalMs) {
+        setIsLate(false);
+        setTimerVariant("arriving");
+        setTimeRemaining(`Arrives in ${fmtDuration(arrivalMs - nowMs)}`);
+      } else if (nowMs < deadlineMs) {
+        setIsLate(false);
+        setTimerVariant("grace");
+        setTimeRemaining(`Grace ends in ${fmtDuration(deadlineMs - nowMs)}`);
+      } else {
+        setIsLate(true);
+        setTimerVariant(null);
+        setTimeRemaining("");
       }
     };
 
@@ -211,11 +241,11 @@ function ReservationCard({
           </div>
 
           {/* Countdown Timer */}
-          {isToday && timeRemaining && (
+          {isToday && !isLate && timerVariant && timeRemaining && (
             <div
-              className={`absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full backdrop-blur-sm px-3 py-1 text-xs font-mono font-bold shadow-sm ${
-                isLate
-                  ? "bg-rose-600 text-white"
+              className={`absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full backdrop-blur-sm px-3 py-1 text-xs font-semibold shadow-sm ${
+                timerVariant === "grace"
+                  ? "bg-amber-500 text-white border border-amber-400"
                   : "bg-white/95 dark:bg-[#130005]/95 text-[#900546] dark:text-[#F968AC] border border-[#D9C3C3]"
               }`}
             >
@@ -258,7 +288,7 @@ function ReservationCard({
             </div>
             <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
               <Clock className="size-3.5 text-[#618685] shrink-0" />
-              <span>Expected Time: {booking.arrivalTime || "Flexible"}</span>
+              <span>Expected Time: {formatTime12hr(booking.arrivalTime)}</span>
             </div>
             {booking.clientEmail && (
               <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">

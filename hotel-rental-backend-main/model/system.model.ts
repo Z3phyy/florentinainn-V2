@@ -4,6 +4,7 @@ import mongoose, { Schema } from 'mongoose';
 const SystemSchema = new Schema({
     systemInfo: { type: String, required: true },
     paymentMin : { type: Number, required: true },
+    gracePeriodHours: { type: Number, default: 2 },
     logo : { type: String, required: true },
     systemName : { type: String, required: true },
     header : { type: String, required: true },

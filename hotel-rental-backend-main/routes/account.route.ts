@@ -8,6 +8,7 @@ const route = Router()
 
 route.post("/", authLimiter, AccountController.createAccount)
 route.post("/login", authLimiter, AccountController.login)
+route.get("/check-email/:email", authLimiter, AccountController.checkEmailAvailability)
 
 route.put("/change-credentials", authenticateJWT, AccountController.changeCredentials)
 route.get("/", authenticateJWT, requireAdmin, AccountController.getAccounts)
