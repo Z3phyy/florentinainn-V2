@@ -32,11 +32,20 @@ import {
   Banknote,
   Smartphone,
   Globe,
-  Building2,
   RotateCcw,
 } from "lucide-react";
 import { systemInterface } from "@/app/types/system.type";
 import useUserStore from "@/app/store/useUserStore";
+import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
+import { printHtmlDocument } from "@/app/utils/printDocument";
+import {
+  buildStayReceiptHtml,
+  RECEIPT_STYLES,
+  STAY_RECEIPT_STYLES,
+  RECEIPT_PAGE_CSS,
+  StayReceiptData,
+  StayReceiptLine,
+} from "@/app/utils/receiptTemplate";
 
 interface Props {
   booking: bookingInterface;
@@ -69,7 +78,9 @@ export function CheckoutModal({ booking }: Props) {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Cash");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [refNumber, setRefNumber] = useState("");
-  const [step, setStep] = useState<"billing" | "review" | "completed">("billing");
+  const [step, setStep] = useState<"billing" | "review" | "completed">(
+    "billing",
+  );
   const [receiptData, setReceiptData] = useState<ReceiptSnapshot | null>(null);
 
   const { data: systemInfo } = useQuery<systemInterface>({
@@ -81,7 +92,10 @@ export function CheckoutModal({ booking }: Props) {
   });
 
   const room = booking.room;
-  const daysStayed = useMemo(() => getDaysFromDate(booking.arrivalDate), [booking.arrivalDate]);
+  const daysStayed = useMemo(
+    () => getDaysFromDate(booking.arrivalDate),
+    [booking.arrivalDate],
+  );
   const nights = Math.max(1, daysStayed);
 
   // Apply discount if room has one
@@ -134,7 +148,8 @@ export function CheckoutModal({ booking }: Props) {
 
       // Save receipt snapshot for immediate printing
       const snapshot: ReceiptSnapshot = {
-        receiptNo: refNumber.trim() || `CHK-${booking._id.slice(-6).toUpperCase()}`,
+        receiptNo:
+          refNumber.trim() || `CHK-${booking._id.slice(-6).toUpperCase()}`,
         checkoutDate: new Date().toLocaleDateString("en-PH", {
           year: "numeric",
           month: "short",
@@ -162,7 +177,8 @@ export function CheckoutModal({ booking }: Props) {
       setStep("completed");
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
-      const message = err.response?.data?.message || "Failed to checkout guest.";
+      const message =
+        err.response?.data?.message || "Failed to checkout guest.";
       errorAlert(message);
     },
   });
@@ -178,7 +194,9 @@ export function CheckoutModal({ booking }: Props) {
   const handlePaymentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isPaymentValid) {
-      errorAlert(`Payment must cover the full balance due of ${formatCurrency(balanceDue)}. To collect a deposit without checking out, use the Pay Partial Payment button.`);
+      errorAlert(
+        `Payment must cover the full balance due of ${formatCurrency(balanceDue)}. To collect a deposit without checking out, use the Pay Partial Payment button.`,
+      );
       return;
     }
     setStep("review");
@@ -195,8 +213,90 @@ export function CheckoutModal({ booking }: Props) {
     });
   };
 
-  const handlePrintReceipt = () => {
-    window.print();
+  const brand = getBrand(systemInfo);
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const buildFolioHtml = (snapshot: ReceiptSnapshot, logoUrl: string) => {
+    const lines: StayReceiptLine[] = [
+      {
+        label: `Room rate (${snapshot.nights} × ${formatCurrency(snapshot.roomPrice)})`,
+        value: snapshot.roomPrice * snapshot.nights,
+        tone: "muted",
+      },
+    ];
+
+    if (snapshot.discount > 0) {
+      lines.push({
+        label: `Discount (${snapshot.discount}%)`,
+        value: -(
+          snapshot.roomPrice *
+          snapshot.nights *
+          (snapshot.discount / 100)
+        ),
+        tone: "credit",
+      });
+    }
+
+    if (snapshot.downPayment > 0) {
+      lines.push({
+        label: "Already paid (deposit)",
+        value: -snapshot.downPayment,
+        tone: "credit",
+      });
+    }
+
+    lines.push({
+      label: "Balance due at checkout",
+      value: snapshot.balanceDue,
+      tone: "muted",
+    });
+
+    const data: StayReceiptData = {
+      hotelName: brand.hotelName,
+      logoUrl,
+      receiptNo: snapshot.receiptNo,
+      checkoutDate: snapshot.checkoutDate,
+      guestName: snapshot.guestName,
+      roomLabel: room.roomNumber
+        ? `Room ${room.roomNumber} (${snapshot.roomCategory})`
+        : snapshot.roomCategory,
+      nights: snapshot.nights,
+      methodLabel: snapshot.method,
+      lines,
+      totalBill: snapshot.totalBill,
+      amountPaid: snapshot.amountPaid,
+      change: snapshot.change,
+      showChange: snapshot.method === "Cash",
+      cashierName: snapshot.cashierName,
+      issuedAt: new Date().toLocaleString("en-PH", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+
+    return buildStayReceiptHtml(data);
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!receiptData || isPrinting) return;
+
+    setIsPrinting(true);
+    try {
+      const inlineLogo = await getLogoDataUrl(brand.logoUrl);
+      const printed = await printHtmlDocument({
+        title: `${brand.hotelName} - Folio ${receiptData.receiptNo}`,
+        bodyHtml: buildFolioHtml(receiptData, inlineLogo),
+        styles: `${RECEIPT_STYLES}${STAY_RECEIPT_STYLES}`,
+        pageCss: RECEIPT_PAGE_CSS,
+      });
+      if (!printed)
+        errorAlert("Could not open the print dialog. Please try again.");
+    } finally {
+      setIsPrinting(false);
+    }
   };
 
   const formatCurrency = (value: number) =>
@@ -229,38 +329,14 @@ export function CheckoutModal({ booking }: Props) {
         </DialogTrigger>
 
         <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto p-0 gap-0">
-          {/* Print stylesheet for Receipt */}
-          <style>{`
-            @media print {
-              body * {
-                visibility: hidden !important;
-              }
-              #printable-checkout-receipt,
-              #printable-checkout-receipt * {
-                visibility: visible !important;
-              }
-              #printable-checkout-receipt {
-                position: fixed !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                margin: 0 !important;
-                padding: 24px !important;
-                background: white !important;
-                color: black !important;
-                box-shadow: none !important;
-                border: none !important;
-              }
-              .no-print {
-                display: none !important;
-              }
-            }
-          `}</style>
+          <style>{`${RECEIPT_STYLES}${STAY_RECEIPT_STYLES}`}</style>
 
           <DialogHeader className="p-6 pb-4 border-b border-border bg-card">
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
               <ReceiptText className="size-5 text-primary" />
-              {step === "completed" ? "Checkout Successful" : "Billing & Checkout"}
+              {step === "completed"
+                ? "Checkout Successful"
+                : "Billing & Checkout"}
             </DialogTitle>
             <DialogDescription className="text-xs">
               {step === "completed"
@@ -289,7 +365,8 @@ export function CheckoutModal({ booking }: Props) {
                     )}
                     <div>
                       <p className="font-semibold text-sm">
-                        {room.roomNumber ? `Room ${room.roomNumber} · ` : ""}{room.category}
+                        {room.roomNumber ? `Room ${room.roomNumber} · ` : ""}
+                        {room.category}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {formatCurrency(room.price)} / night
@@ -302,16 +379,21 @@ export function CheckoutModal({ booking }: Props) {
                   <div className="grid grid-cols-2 gap-2.5 text-xs">
                     <div className="flex items-center gap-2">
                       <User className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="font-medium truncate">{booking.clientName}</span>
+                      <span className="font-medium truncate">
+                        {booking.clientName}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <CalendarDays className="size-3.5 text-muted-foreground shrink-0" />
                       <span>
                         Arrived:{" "}
-                        {new Date(booking.arrivalDate).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {new Date(booking.arrivalDate).toLocaleDateString(
+                          "en-US",
+                          {
+                            month: "short",
+                            day: "numeric",
+                          },
+                        )}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -331,15 +413,23 @@ export function CheckoutModal({ booking }: Props) {
                 <div className="rounded-xl border border-border p-4 space-y-2 bg-card text-xs">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">
-                      Room Rate ({nights} night{nights !== 1 ? "s" : ""} × {formatCurrency(room.price)})
+                      Room Rate ({nights} night{nights !== 1 ? "s" : ""} ×{" "}
+                      {formatCurrency(room.price)})
                     </span>
-                    <span className="font-medium">{formatCurrency(room.price * nights)}</span>
+                    <span className="font-medium">
+                      {formatCurrency(room.price * nights)}
+                    </span>
                   </div>
 
                   {room.discount > 0 && (
                     <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
                       <span>Room Discount ({room.discount}%)</span>
-                      <span>-{formatCurrency(room.price * nights - discountedPrice * nights)}</span>
+                      <span>
+                        -
+                        {formatCurrency(
+                          room.price * nights - discountedPrice * nights,
+                        )}
+                      </span>
                     </div>
                   )}
 
@@ -352,7 +442,9 @@ export function CheckoutModal({ booking }: Props) {
 
                   <div className="flex justify-between font-bold text-sm pt-2 border-t border-border">
                     <span>Total Bill</span>
-                    <span className="font-mono">{formatCurrency(totalBill)}</span>
+                    <span className="font-mono">
+                      {formatCurrency(totalBill)}
+                    </span>
                   </div>
 
                   <div className="flex justify-between text-sm font-semibold">
@@ -415,7 +507,8 @@ export function CheckoutModal({ booking }: Props) {
                   {paymentMethod === "Cash" ? (
                     <div className="space-y-1.5">
                       <Label htmlFor="payment" className="text-xs">
-                        Amount Received (₱) <span className="text-destructive">*</span>
+                        Amount Received (₱){" "}
+                        <span className="text-destructive">*</span>
                       </Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-semibold">
@@ -435,7 +528,10 @@ export function CheckoutModal({ booking }: Props) {
                       </div>
                       {isShortPayment && (
                         <p className="text-[11px] text-destructive font-medium">
-                          Insufficient amount. Balance due is {formatCurrency(balanceDue)}. Use the Pay Partial Payment button to collect a deposit without checking out.
+                          Insufficient amount. Balance due is{" "}
+                          {formatCurrency(balanceDue)}. Use the Pay Partial
+                          Payment button to collect a deposit without checking
+                          out.
                         </p>
                       )}
                       {paymentAmount && paidNow > balanceDue && (
@@ -503,7 +599,9 @@ export function CheckoutModal({ booking }: Props) {
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Guest Name</span>
-                      <span className="font-semibold">{booking.clientName}</span>
+                      <span className="font-semibold">
+                        {booking.clientName}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Room</span>
@@ -511,11 +609,15 @@ export function CheckoutModal({ booking }: Props) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Total Bill</span>
-                      <span className="font-bold">{formatCurrency(totalBill)}</span>
+                      <span className="font-bold">
+                        {formatCurrency(totalBill)}
+                      </span>
                     </div>
                     {alreadyPaid > 0 && (
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Already Paid (deposit)</span>
+                        <span className="text-muted-foreground">
+                          Already Paid (deposit)
+                        </span>
                         <span className="font-semibold text-blue-600 dark:text-blue-400">
                           {formatCurrency(alreadyPaid)}
                         </span>
@@ -523,10 +625,14 @@ export function CheckoutModal({ booking }: Props) {
                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Balance Due</span>
-                      <span className="font-bold">{formatCurrency(balanceDue)}</span>
+                      <span className="font-bold">
+                        {formatCurrency(balanceDue)}
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Amount Paid Now ({paymentMethod})</span>
+                      <span className="text-muted-foreground">
+                        Amount Paid Now ({paymentMethod})
+                      </span>
                       <span className="font-mono font-bold">
                         {formatCurrency(paidNow)}
                       </span>
@@ -585,113 +691,15 @@ export function CheckoutModal({ booking }: Props) {
             {/* ── STEP 3: COMPLETED RECEIPT & PRINT ── */}
             {step === "completed" && receiptData && (
               <div className="space-y-4">
-                {/* Printable Receipt Card */}
-                <div
-                  id="printable-checkout-receipt"
-                  className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs font-sans shadow-xs"
-                >
-                  {/* Receipt Header */}
-                  <div className="text-center space-y-1 border-b border-border pb-3">
-                    <div className="flex items-center justify-center gap-1.5">
-                      <Building2 className="size-4 text-primary" />
-                      <h2 className="font-bold text-sm tracking-tight text-foreground uppercase">
-                        {systemInfo?.systemName || "Hotel Management"}
-                      </h2>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Official Guest Checkout Folio & Receipt
-                    </p>
-                    <p className="text-[10px] font-mono text-muted-foreground">
-                      Ref: {receiptData.receiptNo} · {receiptData.checkoutDate}
-                    </p>
-                  </div>
-
-                  {/* Guest & Stay Details */}
-                  <div className="grid grid-cols-2 gap-2 text-xs border-b border-border pb-3">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Guest Name</p>
-                      <p className="font-bold">{receiptData.guestName}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Room / Category</p>
-                      <p className="font-medium">
-                        {room.roomNumber ? `Room ${room.roomNumber} (${receiptData.roomCategory})` : receiptData.roomCategory}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Nights Stayed</p>
-                      <p className="font-medium">{receiptData.nights} Night(s)</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Payment Method</p>
-                      <p className="font-semibold text-emerald-600 dark:text-emerald-400">
-                        {receiptData.method}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Pricing Breakdown */}
-                  <div className="space-y-1.5 text-xs border-b border-border pb-3">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Room Rate ({receiptData.nights} × {formatCurrency(receiptData.roomPrice)})
-                      </span>
-                      <span>{formatCurrency(receiptData.roomPrice * receiptData.nights)}</span>
-                    </div>
-
-                    {receiptData.discount > 0 && (
-                      <div className="flex justify-between text-emerald-600">
-                        <span>Discount ({receiptData.discount}%)</span>
-                        <span>
-                          -{formatCurrency(
-                            receiptData.roomPrice * receiptData.nights * (receiptData.discount / 100)
-                          )}
-                        </span>
-                      </div>
-                    )}
-
-                    {receiptData.downPayment > 0 && (
-                      <div className="flex justify-between text-blue-600">
-                        <span>Already Paid (deposit)</span>
-                        <span>-{formatCurrency(receiptData.downPayment)}</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between font-bold text-sm pt-1 border-t border-border/60">
-                      <span>Total Bill</span>
-                      <span className="font-mono">{formatCurrency(receiptData.totalBill)}</span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Balance Due</span>
-                      <span className="font-mono">{formatCurrency(receiptData.balanceDue)}</span>
-                    </div>
-
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Amount Tendered</span>
-                      <span className="font-mono">{formatCurrency(receiptData.amountPaid)}</span>
-                    </div>
-
-                    {receiptData.method === "Cash" && (
-                      <div className="flex justify-between font-semibold text-emerald-600">
-                        <span>Change Given</span>
-                        <span className="font-mono">{formatCurrency(receiptData.change)}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Signatures / Footer */}
-                  <div className="pt-2 flex justify-between items-end text-[10px] text-muted-foreground">
-                    <div>
-                      <p>Processed By: {receiptData.cashierName}</p>
-                      <p>Thank you for staying with us!</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-                        <CheckCircle2 className="size-3" /> PAID
-                      </span>
-                    </div>
-                  </div>
+                {/* Receipt preview — rendered from the exact folio markup that
+                    gets printed, including the hotel logo. */}
+                <div className="rounded-xl border border-border bg-muted/20 p-4 overflow-x-auto">
+                  <div
+                    id="checkout-receipt-preview"
+                    dangerouslySetInnerHTML={{
+                      __html: buildFolioHtml(receiptData, brand.logoUrl),
+                    }}
+                  />
                 </div>
 
                 {/* Actions Toolbar */}
@@ -701,10 +709,11 @@ export function CheckoutModal({ booking }: Props) {
                     variant="outline"
                     size="sm"
                     onClick={handlePrintReceipt}
+                    disabled={isPrinting}
                     className="text-xs gap-1.5"
                   >
                     <Printer className="size-3.5 text-primary" />
-                    Print Receipt
+                    {isPrinting ? "Preparing..." : "Print / Save as PDF"}
                   </Button>
 
                   <Button

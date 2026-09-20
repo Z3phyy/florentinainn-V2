@@ -1,29 +1,47 @@
 import { Response, response } from "express";
 import { AuthRequest } from "../types/request.type";
-import { accountInterface, accountInterfaceInput } from "../types/accounts.type";
+import {
+  accountInterface,
+  accountInterfaceInput,
+} from "../types/accounts.type";
 import { AccountService } from "../services/acccount.service";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
 import { AdminService } from "../services/admin.service";
+import {
+  LoginAttemptService,
+  LockStatus,
+} from "../services/loginAttempt.service";
+import {
+  EMAIL_POLICY,
+  IP_POLICY,
+  MAX_FAILED_ATTEMPTS,
+} from "../config/loginPolicy";
 import { validatePassword, validateEmail } from "../utils/validation";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { getJwtSecret } from "../config/jwt";
 
-const secret = getJwtSecret()
+const secret = getJwtSecret();
 
+const lockoutPayload = (status: LockStatus) => ({
+  locked: true,
+  lockedUntil: status.lockedUntil ? status.lockedUntil.toISOString() : null,
+  retryAfterSeconds: status.retryAfterSeconds,
+  remainingAttempts: 0,
+  maxAttempts: MAX_FAILED_ATTEMPTS,
+  message: `Too many failed login attempts. Try again in ${Math.ceil(status.retryAfterSeconds / 60)} minute(s).`,
+});
 
 export class AccountController {
-
-  static createAccount = async (request : AuthRequest , response : Response) => {
-
-    const accountData : accountInterfaceInput = request.body
+  static createAccount = async (request: AuthRequest, response: Response) => {
+    const accountData: accountInterfaceInput = request.body;
 
     // isApproved is a required schema field; the staff registration form sends it.
     // Default to pending approval so an omitted value cannot crash the request.
     if (typeof accountData.isApproved !== "boolean") {
-      accountData.isApproved = false
+      accountData.isApproved = false;
     }
 
     const emailErr = validateEmail(accountData.email);
@@ -38,20 +56,20 @@ export class AccountController {
       return;
     }
 
-    if(await AccountService.checkEmail(accountData.email)){
-        response.status(400).send("Email already registered")
-        return
+    if (await AccountService.checkEmail(accountData.email)) {
+      response.status(400).send("Email already registered");
+      return;
     }
 
-    if(await AdminService.getByEmail(accountData.email)){
-        response.status(400).send("Email already registered in admin account")
-        return
+    if (await AdminService.getByEmail(accountData.email)) {
+      response.status(400).send("Email already registered in admin account");
+      return;
     }
 
     const hashedPassword = await bcrypt.hash(accountData.password, 10);
-    accountData.password = hashedPassword
+    accountData.password = hashedPassword;
 
-    const account = await AccountService.create(accountData)
+    const account = await AccountService.create(accountData);
     await logAuditAction({
       action: "STAFF_REGISTERED",
       details: `New staff registered: ${accountData.name} (${accountData.email})`,
@@ -69,15 +87,18 @@ export class AccountController {
       targetId: account._id ? String(account._id) : undefined,
     });
 
-    response.send(account)
-  }
+    response.send(account);
+  };
 
-static checkEmailAvailability = async (request: AuthRequest, response: Response) => {
+  static checkEmailAvailability = async (
+    request: AuthRequest,
+    response: Response,
+  ) => {
     const email = (request.params.email || "").toLowerCase().trim();
 
     if (!email) {
-      response.status(400).send("Email is required")
-      return
+      response.status(400).send("Email is required");
+      return;
     }
 
     const emailErr = validateEmail(email);
@@ -92,100 +113,182 @@ static checkEmailAvailability = async (request: AuthRequest, response: Response)
     response.send({
       available: !isStaff && !isAdmin,
       takenBy: isAdmin ? "admin" : isStaff ? "staff" : null,
-    })
-  }
+    });
+  };
 
-static login = async (request: AuthRequest, response: Response) => {
-  try {
-    const { email, password } = request.body;
+  static login = async (request: AuthRequest, response: Response) => {
+    try {
+      const email =
+        typeof request.body?.email === "string"
+          ? request.body.email.trim()
+          : "";
+      const password =
+        typeof request.body?.password === "string" ? request.body.password : "";
 
-    // Check both employee account and admin account
-    const account = await AccountService.checkEmail(email);
-    const adminAccount = await AdminService.getByEmail(email);
-
-    // User does not exist
-    if (!account && !adminAccount) {
-      response.status(404).send("User not found");
-      return;
-    }
-
-    let authenticatedAccount: any = null;
-    let role: "super admin" | "admin" | "employee" = "employee";
-
-    // 1. Try checking Admin credentials first if admin exists
-    if (adminAccount) {
-      const isMatch = await bcrypt.compare(password, adminAccount.password);
-      if (isMatch) {
-        authenticatedAccount = adminAccount;
-        role = adminAccount.type as "super admin" | "admin";
-      }
-    }
-
-    // 2. If not authenticated as admin, try checking Staff/Employee credentials
-    if (!authenticatedAccount && account) {
-      if (account.isApproved === false) {
-        response.status(403).send("Account is pending approval");
+      if (!email || !password) {
+        response
+          .status(400)
+          .json({ message: "Email and password are required." });
         return;
       }
-      const isMatch = await bcrypt.compare(password, account.password);
-      if (isMatch) {
-        authenticatedAccount = account;
-        role = "employee";
+
+      const emailKey = LoginAttemptService.emailKey(email);
+      const ipKey = LoginAttemptService.ipKey(request.ip || "unknown");
+
+      const emailStatus = await LoginAttemptService.getStatus(
+        emailKey,
+        EMAIL_POLICY,
+      );
+      if (emailStatus.locked) {
+        response.status(429).json(lockoutPayload(emailStatus));
+        return;
       }
-    }
 
-    // If neither matched
-    if (!authenticatedAccount) {
-      response.status(401).send("Incorrect password");
-      return;
-    }
+      const ipStatus = await LoginAttemptService.getStatus(ipKey, IP_POLICY);
+      if (ipStatus.locked) {
+        response.status(429).json(lockoutPayload(ipStatus));
+        return;
+      }
 
-    // Create token with id, role, and name
-    const token = jwt.sign(
-      {
-        id: authenticatedAccount._id,
+      const failAndRespond = async (status: number, message: string) => {
+        const emailFailure = await LoginAttemptService.registerFailure(
+          emailKey,
+          "email",
+          EMAIL_POLICY,
+        );
+        const ipFailure = await LoginAttemptService.registerFailure(
+          ipKey,
+          "ip",
+          IP_POLICY,
+        );
+
+        const lock = emailFailure.locked
+          ? emailFailure
+          : ipFailure.locked
+            ? ipFailure
+            : null;
+
+        if (lock) {
+          await logAuditAction({
+            action: "LOGIN_LOCKED",
+            details: `Login locked after ${MAX_FAILED_ATTEMPTS} failed attempts for ${email}`,
+            actorName: email,
+            targetType: "account",
+          });
+          response.status(429).json(lockoutPayload(lock));
+          return;
+        }
+
+        response.status(status).json({
+          message,
+          locked: false,
+          lockedUntil: null,
+          retryAfterSeconds: 0,
+          remainingAttempts: emailFailure.remainingAttempts,
+          maxAttempts: MAX_FAILED_ATTEMPTS,
+        });
+      };
+
+      // Check both employee account and admin account
+      const account = await AccountService.checkEmail(email);
+      const adminAccount = await AdminService.getByEmail(email);
+
+      // User does not exist
+      if (!account && !adminAccount) {
+        await failAndRespond(404, "User not found");
+        return;
+      }
+
+      let authenticatedAccount: any = null;
+      let role: "super admin" | "admin" | "employee" = "employee";
+
+      // 1. Try checking Admin credentials first if admin exists
+      if (adminAccount) {
+        const isMatch = await bcrypt.compare(password, adminAccount.password);
+        if (isMatch) {
+          authenticatedAccount = adminAccount;
+          role = adminAccount.type as "super admin" | "admin";
+        }
+      }
+
+      // 2. If not authenticated as admin, try checking Staff/Employee credentials
+      if (!authenticatedAccount && account) {
+        if (account.isApproved === false) {
+          response.status(403).json({ message: "Account is pending approval" });
+          return;
+        }
+        const isMatch = await bcrypt.compare(password, account.password);
+        if (isMatch) {
+          authenticatedAccount = account;
+          role = "employee";
+        }
+      }
+
+      // If neither matched
+      if (!authenticatedAccount) {
+        await failAndRespond(401, "Incorrect password");
+        return;
+      }
+
+      await LoginAttemptService.reset([emailKey, ipKey]);
+
+      // Create token with id, role, and name
+      const token = jwt.sign(
+        {
+          id: authenticatedAccount._id,
+          role,
+          name:
+            authenticatedAccount.name ||
+            (role === "super admin"
+              ? "Super Admin"
+              : role === "admin"
+                ? "Admin"
+                : "Staff"),
+        },
+        secret,
+        { expiresIn: "3d" },
+      );
+
+      const safeAccount = authenticatedAccount?.toObject
+        ? authenticatedAccount.toObject()
+        : { ...authenticatedAccount };
+      delete safeAccount.password;
+      delete safeAccount.otp;
+      delete safeAccount.otpExpiresAt;
+
+      response.send({
+        account: safeAccount,
+        token,
         role,
-        name: authenticatedAccount.name || (role === "super admin" ? "Super Admin" : role === "admin" ? "Admin" : "Staff"),
-      },
-      secret,
-      { expiresIn: "3d" }
-    );
+      });
+    } catch (error) {
+      console.error(error);
+      response.status(500).send("Server error");
+    }
+  };
 
-    const safeAccount = authenticatedAccount?.toObject
-      ? authenticatedAccount.toObject()
-      : { ...authenticatedAccount };
-    delete safeAccount.password;
-    delete safeAccount.otp;
-    delete safeAccount.otpExpiresAt;
+  static getAccounts = async (request: AuthRequest, response: Response) => {
+    const accounts = await AccountService.getAll();
+    response.send(accounts);
+  };
 
-    response.send({
-      account: safeAccount,
-      token,
-      role,
-    });
-
-  } catch (error) {
-    console.error(error);
-    response.status(500).send("Server error");
-  }
-};
-
-  static getAccounts = async (request : AuthRequest , response : Response) => {
-    const accounts = await AccountService.getAll()
-    response.send(accounts)
-  }
-
-  static updateAccount = async (request : AuthRequest , response : Response) => {
-    const { _id, name, email, password, permisions } = request.body
-    const updateData: Partial<accountInterfaceInput> = { name, email, permisions, isApproved: true, otp: null }
+  static updateAccount = async (request: AuthRequest, response: Response) => {
+    const { _id, name, email, password, permisions } = request.body;
+    const updateData: Partial<accountInterfaceInput> = {
+      name,
+      email,
+      permisions,
+      isApproved: true,
+      otp: null,
+    };
     if (password && typeof password === "string" && password.trim() !== "") {
       if (/^\$2[aby]\$/.test(password)) {
-        updateData.password = password
+        updateData.password = password;
       } else {
-        updateData.password = await bcrypt.hash(password, 10)
+        updateData.password = await bcrypt.hash(password, 10);
       }
     }
-    await AccountService.update(_id, updateData as accountInterfaceInput)
+    await AccountService.update(_id, updateData as accountInterfaceInput);
     await logAuditAction({
       action: "STAFF_UPDATED",
       details: `Updated staff permissions for ${name || email}`,
@@ -193,14 +296,14 @@ static login = async (request: AuthRequest, response: Response) => {
       actorRole: request.account?.type || "admin",
       targetType: "staff",
       targetId: _id,
-    })
-    const accounts = await AccountService.getAll()
-    response.send(accounts)
-  }
+    });
+    const accounts = await AccountService.getAll();
+    response.send(accounts);
+  };
 
-  static deleteAccount = async (request : AuthRequest , response : Response) => {
-    const { _id } = request.body
-    await AccountService.delete(_id)
+  static deleteAccount = async (request: AuthRequest, response: Response) => {
+    const { _id } = request.body;
+    await AccountService.delete(_id);
     await logAuditAction({
       action: "STAFF_DELETED",
       details: `Removed staff account ${_id}`,
@@ -208,29 +311,28 @@ static login = async (request: AuthRequest, response: Response) => {
       actorRole: request.account?.type || "admin",
       targetType: "staff",
       targetId: _id,
-    })
-    const accounts = await AccountService.getAll()
-    response.send(accounts)
-  }
+    });
+    const accounts = await AccountService.getAll();
+    response.send(accounts);
+  };
 
-
-  static approveAccount = async (request : AuthRequest , response : Response) => {
+  static approveAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body
+      const { _id } = request.body;
 
       if (!_id) {
-        response.status(400).send("Account id is required")
-        return
+        response.status(400).send("Account id is required");
+        return;
       }
 
-      const account = await AccountService.get(_id)
+      const account = await AccountService.get(_id);
 
       if (!account) {
-        response.status(404).send("Account not found")
-        return
+        response.status(404).send("Account not found");
+        return;
       }
 
-      await AccountService.approve(_id)
+      await AccountService.approve(_id);
       await logAuditAction({
         action: "STAFF_APPROVED",
         details: `Approved staff access for ${account.name} (${account.email})`,
@@ -238,7 +340,7 @@ static login = async (request: AuthRequest, response: Response) => {
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
-      })
+      });
 
       await notify({
         type: "account",
@@ -250,31 +352,33 @@ static login = async (request: AuthRequest, response: Response) => {
         targetId: _id,
       });
 
-      const accounts = await AccountService.getAll()
-      response.send(accounts)
+      const accounts = await AccountService.getAll();
+      response.send(accounts);
     } catch (error) {
-      console.log("Failed to approve account: " + (error as Error).message)
-      response.status(500).send("Failed to approve account: " + (error as Error).message)
+      console.log("Failed to approve account: " + (error as Error).message);
+      response
+        .status(500)
+        .send("Failed to approve account: " + (error as Error).message);
     }
-  }
+  };
 
-  static rejectAccount = async (request : AuthRequest , response : Response) => {
+  static rejectAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body
+      const { _id } = request.body;
 
       if (!_id) {
-        response.status(400).send("Account id is required")
-        return
+        response.status(400).send("Account id is required");
+        return;
       }
 
-      const account = await AccountService.get(_id)
+      const account = await AccountService.get(_id);
 
       if (!account) {
-        response.status(404).send("Account not found")
-        return
+        response.status(404).send("Account not found");
+        return;
       }
 
-      await AccountService.delete(_id)
+      await AccountService.delete(_id);
       await logAuditAction({
         action: "STAFF_REJECTED",
         details: `Rejected & removed staff application for ${account.name} (${account.email})`,
@@ -282,7 +386,7 @@ static login = async (request: AuthRequest, response: Response) => {
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
-      })
+      });
 
       await notify({
         type: "account",
@@ -294,63 +398,74 @@ static login = async (request: AuthRequest, response: Response) => {
         targetId: _id,
       });
 
-      const accounts = await AccountService.getAll()
-      response.send(accounts)
+      const accounts = await AccountService.getAll();
+      response.send(accounts);
     } catch (error) {
-      console.log("Failed to reject account: " + (error as Error).message)
-      response.status(500).send("Failed to reject account: " + (error as Error).message)
+      console.log("Failed to reject account: " + (error as Error).message);
+      response
+        .status(500)
+        .send("Failed to reject account: " + (error as Error).message);
     }
-  }
+  };
 
-
-  static changeCredentials = async (request : AuthRequest , response : Response) => {
+  static changeCredentials = async (
+    request: AuthRequest,
+    response: Response,
+  ) => {
     try {
-      const { oldEmail, oldPassword, name, newEmail, newPassword } = request.body
-      const accountId = request.account?._id
+      const { oldEmail, oldPassword, name, newEmail, newPassword } =
+        request.body;
+      const accountId = request.account?._id;
 
       if (!accountId) {
-        response.status(401).json({ message: "Unauthorized" })
-        return
+        response.status(401).json({ message: "Unauthorized" });
+        return;
       }
 
       // Verify old credentials belong to the authenticated user
-      const account = await AccountService.checkEmail(oldEmail)
+      const account = await AccountService.checkEmail(oldEmail);
       if (!account || account._id.toString() !== accountId) {
-        response.status(400).json({ message: "Account not found for provided current email" })
-        return
+        response
+          .status(400)
+          .json({ message: "Account not found for provided current email" });
+        return;
       }
 
       const isMatch = await bcrypt.compare(oldPassword, account.password);
 
-      if(!isMatch){
-          response.status(400).json({ message: "Incorrect current password" })
-          return
+      if (!isMatch) {
+        response.status(400).json({ message: "Incorrect current password" });
+        return;
       }
 
       // Check if new email is already taken (if changing email)
       if (newEmail && newEmail !== oldEmail) {
-        const emailErr = validateEmail(newEmail)
+        const emailErr = validateEmail(newEmail);
         if (emailErr) {
-          response.status(400).json({ message: emailErr })
-          return
+          response.status(400).json({ message: emailErr });
+          return;
         }
 
-        const existing = await AccountService.checkEmail(newEmail)
+        const existing = await AccountService.checkEmail(newEmail);
         if (existing) {
-          response.status(400).json({ message: "New email is already taken by another staff account" })
-          return
+          response.status(400).json({
+            message: "New email is already taken by another staff account",
+          });
+          return;
         }
         if (await AdminService.getByEmail(newEmail)) {
-          response.status(400).json({ message: "New email is already taken by an admin account" })
-          return
+          response.status(400).json({
+            message: "New email is already taken by an admin account",
+          });
+          return;
         }
       }
 
       if (newPassword) {
-        const passErr = validatePassword(newPassword)
+        const passErr = validatePassword(newPassword);
         if (passErr) {
-          response.status(400).json({ message: passErr })
-          return
+          response.status(400).json({ message: passErr });
+          return;
         }
       }
 
@@ -358,7 +473,7 @@ static login = async (request: AuthRequest, response: Response) => {
         name: name ? name.trim() : undefined,
         email: newEmail ? newEmail.trim() : undefined,
         password: newPassword ? await bcrypt.hash(newPassword, 10) : undefined,
-      })
+      });
 
       response.json({
         message: "Credentials updated successfully",
@@ -366,12 +481,11 @@ static login = async (request: AuthRequest, response: Response) => {
           _id: updated?._id,
           name: updated?.name,
           email: updated?.email,
-        }
-      })
+        },
+      });
     } catch (error) {
-      console.error(error)
-      response.status(500).json({ message: "Failed to update credentials" })
+      console.error(error);
+      response.status(500).json({ message: "Failed to update credentials" });
     }
-  }
-
+  };
 }

@@ -35,6 +35,7 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { downloadCSV, downloadPDF, getExportTimestamp } from "@/app/utils/exportFile";
+import { FALLBACK_LOGO, getLogoDataUrl } from "@/app/utils/brand";
 
 type AuditCategoryFilter = "ALL" | "DISCOUNT" | "MAINTENANCE" | "STAFF" | "INQUIRY" | "SYSTEM";
 
@@ -223,17 +224,19 @@ export default function Page() {
     toast.success("Audit trail exported to CSV successfully.");
   };
 
-  const exportAuditToPDF = () => {
+  const exportAuditToPDF = async () => {
     if (!filteredLogs || filteredLogs.length === 0) {
       toast.error("No audit logs to export.");
       return;
     }
-    downloadPDF({
+    const logoDataUrl = await getLogoDataUrl(FALLBACK_LOGO);
+    await downloadPDF({
       filename: `Florentina_Inn_Audit_Trail_${getExportTimestamp()}.pdf`,
       title: "Florentina Inn - Audit Trail",
       subtitle: `${filteredLogs.length} recorded event(s)`,
       headers: auditExportHeaders,
       rows: buildAuditRows(),
+      logoDataUrl,
     });
     toast.success("Audit trail exported to PDF successfully.");
   };

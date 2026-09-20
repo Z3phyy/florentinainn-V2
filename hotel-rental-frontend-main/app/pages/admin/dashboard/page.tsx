@@ -7,6 +7,7 @@ import { roomInterface } from "@/app/types/room.type";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { paymentInterface } from "@/app/types/payment.type";
 import { getDaysFromDate } from "@/app/utils/customFunction";
+import { todayDateStr } from "@/app/utils/bookingValidation";
 import {
   AreaChart,
   Area,
@@ -54,8 +55,18 @@ import {
 // ─── Constants ───
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 const ROOM_STATUS_COLORS: Record<string, string> = {
@@ -65,7 +76,13 @@ const ROOM_STATUS_COLORS: Record<string, string> = {
   reserved: "#8b5cf6",
 };
 
-type DateRangePreset = "today" | "this_week" | "this_month" | "last_30_days" | "this_quarter" | "all_time";
+type DateRangePreset =
+  | "today"
+  | "this_week"
+  | "this_month"
+  | "last_30_days"
+  | "this_quarter"
+  | "all_time";
 
 // ─── Helpers ───
 
@@ -78,7 +95,11 @@ function formatCurrency(n: number) {
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 // ─── Circular Occupancy Gauge Component ───
@@ -88,8 +109,7 @@ function OccupancyGauge({ rate }: { rate: number }) {
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (rate / 100) * circumference;
 
-  const color =
-    rate >= 70 ? "#10b981" : rate >= 40 ? "#618685" : "#900546";
+  const color = rate >= 70 ? "#10b981" : rate >= 40 ? "#618685" : "#900546";
 
   return (
     <div className="relative flex size-24 items-center justify-center shrink-0">
@@ -152,7 +172,9 @@ function StatCard({
           {icon}
         </div>
         {badgeText && (
-          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${badgeColor}`}>
+          <span
+            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${badgeColor}`}
+          >
             {badgeText}
           </span>
         )}
@@ -192,9 +214,13 @@ function ChartCard({
     <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] shadow-xs overflow-hidden flex flex-col">
       <div className="px-6 py-4.5 border-b border-[#D9C3C3] dark:border-white/10 flex items-center justify-between flex-wrap gap-2 bg-[#FAF5F5]/60 dark:bg-[#130005]/40">
         <div>
-          <h3 className="font-serif text-lg font-bold text-[#130005] dark:text-white">{title}</h3>
+          <h3 className="font-serif text-lg font-bold text-[#130005] dark:text-white">
+            {title}
+          </h3>
           {subtitle && (
-            <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">{subtitle}</p>
+            <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+              {subtitle}
+            </p>
           )}
         </div>
         {action}
@@ -212,10 +238,22 @@ function ChartTooltip({ active, payload, label }: any) {
     <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white/95 dark:bg-[#130005]/95 backdrop-blur-md px-3.5 py-2.5 text-xs shadow-xl space-y-1">
       <p className="font-bold text-[#130005] dark:text-white">{label}</p>
       {payload.map((entry: any, i: number) => (
-        <p key={i} className="flex items-center gap-2 text-[11px] font-semibold" style={{ color: entry.color || "#900546" }}>
-          <span className="size-2 rounded-full" style={{ backgroundColor: entry.color || "#900546" }} />
+        <p
+          key={i}
+          className="flex items-center gap-2 text-[11px] font-semibold"
+          style={{ color: entry.color || "#900546" }}
+        >
+          <span
+            className="size-2 rounded-full"
+            style={{ backgroundColor: entry.color || "#900546" }}
+          />
           <span>{entry.name}:</span>
-          <span>{typeof entry.value === "number" && entry.name.toLowerCase().includes("revenue") ? formatCurrency(entry.value) : entry.value.toLocaleString()}</span>
+          <span>
+            {typeof entry.value === "number" &&
+            entry.name.toLowerCase().includes("revenue")
+              ? formatCurrency(entry.value)
+              : entry.value.toLocaleString()}
+          </span>
         </p>
       ))}
     </div>
@@ -237,7 +275,9 @@ export default function Page() {
   });
 
   // ── Fetch bookings ──
-  const { data: bookings, isLoading: bookingsLoading } = useQuery<bookingInterface[]>({
+  const { data: bookings, isLoading: bookingsLoading } = useQuery<
+    bookingInterface[]
+  >({
     queryKey: ["dashboard-bookings"],
     queryFn: async () => {
       const res = await axiosInstance.get("/booking");
@@ -246,7 +286,9 @@ export default function Page() {
   });
 
   // ── Fetch payments ──
-  const { data: payments, isLoading: paymentsLoading } = useQuery<paymentInterface[]>({
+  const { data: payments, isLoading: paymentsLoading } = useQuery<
+    paymentInterface[]
+  >({
     queryKey: ["dashboard-payments"],
     queryFn: async () => {
       const res = await axiosInstance.get("/system/payments");
@@ -257,80 +299,91 @@ export default function Page() {
   const isLoading = roomsLoading || bookingsLoading || paymentsLoading;
 
   // ── Dynamic Date Range Filter ──
-  const { filteredBookings, filteredPayments, periodDaysCount, periodLabel } = useMemo(() => {
-    if (!bookings || !payments) {
-      return { filteredBookings: [], filteredPayments: [], periodDaysCount: 30, periodLabel: "This Month" };
-    }
+  const { filteredBookings, filteredPayments, periodDaysCount, periodLabel } =
+    useMemo(() => {
+      if (!bookings || !payments) {
+        return {
+          filteredBookings: [],
+          filteredPayments: [],
+          periodDaysCount: 30,
+          periodLabel: "This Month",
+        };
+      }
 
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    let startDate: Date;
-    let label = "This Month";
-    let days = 30;
+      let startDate: Date;
+      let label = "This Month";
+      let days = 30;
 
-    switch (dateRange) {
-      case "today":
-        startDate = today;
-        label = "Today";
-        days = 1;
-        break;
-      case "this_week":
-        startDate = new Date(today);
-        startDate.setDate(today.getDate() - today.getDay());
-        label = "This Week";
-        days = 7;
-        break;
-      case "this_month":
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        label = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
-        days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        break;
-      case "last_30_days":
-        startDate = new Date(today);
-        startDate.setDate(today.getDate() - 30);
-        label = "Past 30 Days";
-        days = 30;
-        break;
-      case "this_quarter":
-        const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
-        startDate = new Date(now.getFullYear(), quarterMonth, 1);
-        label = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
-        days = 90;
-        break;
-      case "all_time":
-      default:
-        startDate = new Date(2020, 0, 1);
-        label = "All Time History";
-        days = 365;
-        break;
-    }
+      switch (dateRange) {
+        case "today":
+          startDate = today;
+          label = "Today";
+          days = 1;
+          break;
+        case "this_week":
+          startDate = new Date(today);
+          startDate.setDate(today.getDate() - today.getDay());
+          label = "This Week";
+          days = 7;
+          break;
+        case "this_month":
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          label = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+          days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+          break;
+        case "last_30_days":
+          startDate = new Date(today);
+          startDate.setDate(today.getDate() - 30);
+          label = "Past 30 Days";
+          days = 30;
+          break;
+        case "this_quarter":
+          const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
+          startDate = new Date(now.getFullYear(), quarterMonth, 1);
+          label = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
+          days = 90;
+          break;
+        case "all_time":
+        default:
+          startDate = new Date(2020, 0, 1);
+          label = "All Time History";
+          days = 365;
+          break;
+      }
 
-    const fb = bookings.filter((b) => {
-      const d = new Date(b.arrivalDate);
-      return d >= startDate;
-    });
+      const fb = bookings.filter((b) => {
+        const d = new Date(b.arrivalDate);
+        return d >= startDate;
+      });
 
-    const fp = payments.filter((p) => {
-      const d = new Date(p.date);
-      return d >= startDate;
-    });
+      const fp = payments.filter((p) => {
+        const d = new Date(p.date);
+        return d >= startDate;
+      });
 
-    return {
-      filteredBookings: fb,
-      filteredPayments: fp,
-      periodDaysCount: days,
-      periodLabel: label,
-    };
-  }, [bookings, payments, dateRange]);
+      return {
+        filteredBookings: fb,
+        filteredPayments: fp,
+        periodDaysCount: days,
+        periodLabel: label,
+      };
+    }, [bookings, payments, dateRange]);
 
   // ── Derived hospitality stats ──
   const totalRooms = rooms?.length ?? 0;
-  const availableRooms = rooms?.filter((r) => r.status === "available").length ?? 0;
-  const occupiedRooms = rooms?.filter((r) => r.status === "occupied").length ?? 0;
-  const maintenanceRooms = rooms?.filter((r) => r.status === "maintenance").length ?? 0;
-  const reservedRooms = rooms?.filter((r) => r.status === "reserved").length ?? 0;
-  const occupancyRateNumber = totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0;
+  const availableRooms =
+    rooms?.filter((r) => r.status === "available").length ?? 0;
+  const occupiedRooms =
+    rooms?.filter((r) => r.status === "occupied").length ?? 0;
+  const maintenanceRooms =
+    rooms?.filter((r) => r.status === "maintenance").length ?? 0;
+  const reservedRooms =
+    rooms?.filter((r) => r.status === "reserved").length ?? 0;
+  const occupancyRateNumber =
+    totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0;
   const occupancyRate = occupancyRateNumber.toFixed(1);
 
   // Total Revenue in selected period
@@ -339,10 +392,14 @@ export default function Page() {
 
   // ── Industry Standard Metrics: ADR & RevPAR ──
   // ADR (Average Daily Rate) = Total Revenue / Total Bookings in period (or occupied room-days)
-  const adr = totalBookingsCount > 0 ? Math.round(totalRevenue / totalBookingsCount) : 0;
+  const adr =
+    totalBookingsCount > 0 ? Math.round(totalRevenue / totalBookingsCount) : 0;
 
   // RevPAR (Revenue Per Available Room) = Total Revenue / (Total Rooms * Days in Period)
-  const revpar = totalRooms > 0 ? Math.round(totalRevenue / (totalRooms * (periodDaysCount || 1))) : 0;
+  const revpar =
+    totalRooms > 0
+      ? Math.round(totalRevenue / (totalRooms * (periodDaysCount || 1)))
+      : 0;
 
   // ── Revenue Area Chart Data ──
   const revenueChartData = useMemo(() => {
@@ -373,10 +430,18 @@ export default function Page() {
   }, [rooms, availableRooms, occupiedRooms, reservedRooms, maintenanceRooms]);
 
   // ── Bookings by status distribution ──
-  const activeBookings = filteredBookings.filter((b) => b.status === "active" || b.status === "occupied").length;
-  const completedBookings = filteredBookings.filter((b) => b.status === "completed").length;
-  const reservationBookings = filteredBookings.filter((b) => b.status === "reservation" || b.status === "unpaid").length;
-  const canceledBookings = filteredBookings.filter((b) => b.status === "canceled").length;
+  const activeBookings = filteredBookings.filter(
+    (b) => b.status === "active" || b.status === "occupied",
+  ).length;
+  const completedBookings = filteredBookings.filter(
+    (b) => b.status === "completed",
+  ).length;
+  const reservationBookings = filteredBookings.filter(
+    (b) => b.status === "reservation" || b.status === "unpaid",
+  ).length;
+  const canceledBookings = filteredBookings.filter(
+    (b) => b.status === "canceled",
+  ).length;
 
   const bookingStatusData = [
     { name: "Active Lodging", value: activeBookings },
@@ -386,9 +451,11 @@ export default function Page() {
   ].filter((d) => d.value > 0);
 
   // ── Today's operational snapshot (front-desk movements) ──
-  const todayKey = new Date().toDateString();
-  const checkinsToday = bookings?.filter((b) => new Date(b.arrivalDate).toDateString() === todayKey).length ?? 0;
-  const checkoutsToday = bookings?.filter((b) => b.departureDate && new Date(b.departureDate).toDateString() === todayKey).length ?? 0;
+  const todayKey = todayDateStr();
+  const checkinsToday =
+    bookings?.filter((b) => b.arrivalDate === todayKey).length ?? 0;
+  const checkoutsToday =
+    bookings?.filter((b) => b.departureDate === todayKey).length ?? 0;
 
   // ── Total outstanding balance across all in-house folios ──
   const totalOutstandingBalance = useMemo(() => {
@@ -401,7 +468,10 @@ export default function Page() {
         if (!room?.price) return sum;
 
         const discountedPrice = room.price * (1 - (room.discount || 0) / 100);
-        const stayTotal = Math.max(0, discountedPrice * Math.max(1, getDaysFromDate(b.arrivalDate)));
+        const stayTotal = Math.max(
+          0,
+          discountedPrice * Math.max(1, getDaysFromDate(b.arrivalDate)),
+        );
         const paidInPayments = payments
           .filter((p) => p.paymentBy === b.clientName)
           .reduce((s, p) => s + p.amount, 0);
@@ -423,7 +493,10 @@ export default function Page() {
   const recentBookings = useMemo(() => {
     if (!bookings) return [];
     return [...bookings]
-      .sort((a, b) => new Date(b.arrivalDate).getTime() - new Date(a.arrivalDate).getTime())
+      .sort(
+        (a, b) =>
+          new Date(b.arrivalDate).getTime() - new Date(a.arrivalDate).getTime(),
+      )
       .slice(0, 5);
   }, [bookings]);
 
@@ -439,14 +512,20 @@ export default function Page() {
             Hotel Analytics & Performance
           </h1>
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">
-            Real-time occupancy rates, RevPAR metrics, revenue trends, and operational capacity.
+            Real-time occupancy rates, RevPAR metrics, revenue trends, and
+            operational capacity.
           </p>
         </div>
 
         {/* Dynamic Period Dropdown */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">Filter Period:</span>
-          <Select value={dateRange} onValueChange={(val: DateRangePreset) => setDateRange(val)}>
+          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">
+            Filter Period:
+          </span>
+          <Select
+            value={dateRange}
+            onValueChange={(val: DateRangePreset) => setDateRange(val)}
+          >
             <SelectTrigger className="w-[180px] h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] dark:border-white/10 text-xs font-semibold text-[#130005] dark:text-white focus:ring-[#900546]">
               <SelectValue placeholder="Select Range" />
             </SelectTrigger>
@@ -578,15 +657,40 @@ export default function Page() {
               >
                 <div style={{ width: "100%", height: 300 }}>
                   {revenueChartData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300} initialDimension={{ width: 600, height: 300 }}>
-                      <AreaChart data={revenueChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <ResponsiveContainer
+                      width="100%"
+                      height={300}
+                      initialDimension={{ width: 600, height: 300 }}
+                    >
+                      <AreaChart
+                        data={revenueChartData}
+                        margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                      >
                         <defs>
-                          <linearGradient id="florentinaRevenueGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#900546" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#F968AC" stopOpacity={0.0} />
+                          <linearGradient
+                            id="florentinaRevenueGrad"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop
+                              offset="5%"
+                              stopColor="#900546"
+                              stopOpacity={0.4}
+                            />
+                            <stop
+                              offset="95%"
+                              stopColor="#F968AC"
+                              stopOpacity={0.0}
+                            />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#D9C3C3" opacity={0.5} />
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#D9C3C3"
+                          opacity={0.5}
+                        />
                         <XAxis
                           dataKey="date"
                           tick={{ fontSize: 11, fill: "#5C454B" }}
@@ -613,8 +717,13 @@ export default function Page() {
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-[#5C454B] dark:text-gray-400">
                       <CircleDollarSign className="size-10 mb-2 opacity-30 text-[#900546]" />
-                      <p className="text-sm font-semibold text-[#130005] dark:text-white">No Revenue in Selected Period</p>
-                      <p className="text-xs mt-0.5">Switch the filter range above to view historical transactions.</p>
+                      <p className="text-sm font-semibold text-[#130005] dark:text-white">
+                        No Revenue in Selected Period
+                      </p>
+                      <p className="text-xs mt-0.5">
+                        Switch the filter range above to view historical
+                        transactions.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -637,7 +746,9 @@ export default function Page() {
                         <span className="size-2.5 rounded-full bg-emerald-500" />
                         Available for Guests
                       </span>
-                      <span className="font-bold text-[#130005] dark:text-white">{availableRooms} Suites</span>
+                      <span className="font-bold text-[#130005] dark:text-white">
+                        {availableRooms} Suites
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10">
@@ -645,7 +756,9 @@ export default function Page() {
                         <span className="size-2.5 rounded-full bg-[#900546]" />
                         Currently Occupied
                       </span>
-                      <span className="font-bold text-[#130005] dark:text-white">{occupiedRooms} Suites</span>
+                      <span className="font-bold text-[#130005] dark:text-white">
+                        {occupiedRooms} Suites
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10">
@@ -653,7 +766,9 @@ export default function Page() {
                         <span className="size-2.5 rounded-full bg-amber-500" />
                         Under Maintenance
                       </span>
-                      <span className="font-bold text-[#130005] dark:text-white">{maintenanceRooms} Suites</span>
+                      <span className="font-bold text-[#130005] dark:text-white">
+                        {maintenanceRooms} Suites
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -671,7 +786,11 @@ export default function Page() {
               >
                 <div style={{ width: "100%", height: 260 }}>
                   {roomStatusData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={260} initialDimension={{ width: 600, height: 260 }}>
+                    <ResponsiveContainer
+                      width="100%"
+                      height={260}
+                      initialDimension={{ width: 600, height: 260 }}
+                    >
                       <PieChart>
                         <Pie
                           data={roomStatusData}
@@ -685,7 +804,10 @@ export default function Page() {
                           {roomStatusData.map((entry) => (
                             <Cell
                               key={entry.name}
-                              fill={ROOM_STATUS_COLORS[entry.name.toLowerCase()] || "#900546"}
+                              fill={
+                                ROOM_STATUS_COLORS[entry.name.toLowerCase()] ||
+                                "#900546"
+                              }
                             />
                           ))}
                         </Pie>
@@ -694,7 +816,9 @@ export default function Page() {
                           verticalAlign="bottom"
                           height={30}
                           formatter={(value) => (
-                            <span className="text-xs font-medium text-[#5C454B] dark:text-gray-300">{value}</span>
+                            <span className="text-xs font-medium text-[#5C454B] dark:text-gray-300">
+                              {value}
+                            </span>
                           )}
                         />
                       </PieChart>
@@ -716,14 +840,28 @@ export default function Page() {
               >
                 <div style={{ width: "100%", height: 260 }}>
                   {bookingStatusData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={260} initialDimension={{ width: 600, height: 260 }}>
+                    <ResponsiveContainer
+                      width="100%"
+                      height={260}
+                      initialDimension={{ width: 600, height: 260 }}
+                    >
                       <BarChart
                         data={bookingStatusData}
                         layout="vertical"
                         margin={{ top: 10, right: 20, left: 20, bottom: 5 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#D9C3C3" opacity={0.4} horizontal={false} />
-                        <XAxis type="number" tick={{ fontSize: 11, fill: "#5C454B" }} tickLine={false} axisLine={false} />
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#D9C3C3"
+                          opacity={0.4}
+                          horizontal={false}
+                        />
+                        <XAxis
+                          type="number"
+                          tick={{ fontSize: 11, fill: "#5C454B" }}
+                          tickLine={false}
+                          axisLine={false}
+                        />
                         <YAxis
                           type="category"
                           dataKey="name"
@@ -733,7 +871,13 @@ export default function Page() {
                           width={110}
                         />
                         <Tooltip content={<ChartTooltip />} />
-                        <Bar dataKey="value" name="Total Bookings" fill="#900546" radius={[0, 8, 8, 0]} barSize={22} />
+                        <Bar
+                          dataKey="value"
+                          name="Total Bookings"
+                          fill="#900546"
+                          radius={[0, 8, 8, 0]}
+                          barSize={22}
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
@@ -756,7 +900,9 @@ export default function Page() {
               >
                 <div className="space-y-3">
                   {recentTransactions.length === 0 ? (
-                    <p className="text-xs text-[#5C454B] py-6 text-center">No recent payment transactions.</p>
+                    <p className="text-xs text-[#5C454B] py-6 text-center">
+                      No recent payment transactions.
+                    </p>
                   ) : (
                     recentTransactions.map((p) => (
                       <div
@@ -768,7 +914,9 @@ export default function Page() {
                             {p.method?.charAt(0).toUpperCase() || "P"}
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-[#130005] dark:text-white">{p.paymentBy}</p>
+                            <p className="text-xs font-bold text-[#130005] dark:text-white">
+                              {p.paymentBy}
+                            </p>
                             <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
                               Ref: {p.refNumber} · {p.method || "Cash"}
                             </p>
@@ -778,7 +926,9 @@ export default function Page() {
                           <p className="font-serif text-sm font-bold text-[#900546] dark:text-[#F968AC]">
                             {formatCurrency(p.amount)}
                           </p>
-                          <p className="text-[10px] text-[#5C454B] dark:text-gray-400">{formatDate(p.date)}</p>
+                          <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
+                            {formatDate(p.date)}
+                          </p>
                         </div>
                       </div>
                     ))
@@ -795,7 +945,9 @@ export default function Page() {
               >
                 <div className="space-y-3">
                   {recentBookings.length === 0 ? (
-                    <p className="text-xs text-[#5C454B] py-6 text-center">No recent guest reservations.</p>
+                    <p className="text-xs text-[#5C454B] py-6 text-center">
+                      No recent guest reservations.
+                    </p>
                   ) : (
                     recentBookings.map((b) => (
                       <div
@@ -803,9 +955,12 @@ export default function Page() {
                         className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10"
                       >
                         <div>
-                          <p className="text-xs font-bold text-[#130005] dark:text-white">{b.clientName}</p>
+                          <p className="text-xs font-bold text-[#130005] dark:text-white">
+                            {b.clientName}
+                          </p>
                           <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
-                            {b.room ? `${b.room.category}` : "Suite"} · {b.arrivalDate}
+                            {b.room ? `${b.room.category}` : "Suite"} ·{" "}
+                            {b.arrivalDate}
                           </p>
                         </div>
                         <span
@@ -813,8 +968,8 @@ export default function Page() {
                             b.status === "completed"
                               ? "bg-emerald-500/10 text-emerald-700 border-emerald-300"
                               : b.status === "occupied" || b.status === "active"
-                              ? "bg-[#900546]/10 text-[#900546] border-[#900546]/30"
-                              : "bg-amber-500/10 text-amber-700 border-amber-300"
+                                ? "bg-[#900546]/10 text-[#900546] border-[#900546]/30"
+                                : "bg-amber-500/10 text-amber-700 border-amber-300"
                           }`}
                         >
                           {b.status.toUpperCase()}

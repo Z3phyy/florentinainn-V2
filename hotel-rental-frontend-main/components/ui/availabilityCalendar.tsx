@@ -6,6 +6,13 @@ import axiosInstance from "@/app/utils/axios";
 import { formatTime12hr } from "@/app/utils/customFunction";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { roomInterface } from "@/app/types/room.type";
+import {
+  pad,
+  formatKey,
+  todayKey,
+  primaryBooking,
+  buildRoomDayIndex,
+} from "@/app/utils/calendarBookings";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ChevronLeft,
@@ -20,86 +27,20 @@ import {
 } from "lucide-react";
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function pad(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-function formatKey(year: number, month: number, day: number) {
-  return `${year}-${pad(month + 1)}-${pad(day)}`;
-}
-
-function todayKey(): string {
-  const now = new Date();
-  return formatKey(now.getFullYear(), now.getMonth(), now.getDate());
-}
-
-function parseDate(s: string): Date | null {
-  const [y, m, nd] = s.split("-").map(Number);
-  if (!y || !m || !nd) return null;
-  return new Date(y, m - 1, nd);
-}
-
-// A booking affects the room for the whole span it holds it, not just the
-// arrival day. When a departure date is set, the span runs from arrival through
-// the day before departure. Without one, active guests show until checkout and
-// confirmed reservations only on their arrival day.
-function bookingDayKeys(b: bookingInterface): string[] {
-  if (!b || !b.arrivalDate) return [];
-  // Pending/unpaid bookings are excluded — only confirmed (paid) reservations,
-  // checked-in (active) and departed (completed) stays are shown.
-  if (b.status !== "active" && b.status !== "reservation" && b.status !== "completed") return [];
-
-  const arrival = parseDate(b.arrivalDate);
-  if (!arrival) return [b.arrivalDate];
-
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  const departure =
-    b.departureDate && /^\d{4}-\d{2}-\d{2}$/.test(b.departureDate)
-      ? parseDate(b.departureDate)
-      : null;
-
-  // Exclusive end of the occupied span. Historical stays end on their stated
-  // departure; only a guest still in-house past checkout stays shown through
-  // today.
-  let end: Date;
-  if (departure) {
-    end = departure;
-    if (b.status === "active" && end.getTime() <= todayStart.getTime()) {
-      end = new Date(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate() + 1);
-    }
-  } else if (b.status === "active") {
-    end = new Date(todayStart.getFullYear(), todayStart.getMonth(), todayStart.getDate() + 1);
-  } else {
-    end = new Date(arrival.getFullYear(), arrival.getMonth(), arrival.getDate() + 1);
-  }
-
-  const keys: string[] = [];
-  const cur = new Date(arrival.getFullYear(), arrival.getMonth(), arrival.getDate());
-  while (cur.getTime() < end.getTime()) {
-    keys.push(formatKey(cur.getFullYear(), cur.getMonth(), cur.getDate()));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return keys.length ? keys : [b.arrivalDate];
-}
-
-// Pick the booking that should style a cell: checked-in (active) guests take
-// priority over confirmed (paid) reservations; departed (completed) stays fill
-// past months as muted history.
-function primaryBooking(list: bookingInterface[]): bookingInterface | null {
-  return (
-    list.find((b) => b.status === "active") ||
-    list.find((b) => b.status === "reservation") ||
-    list.find((b) => b.status === "completed") ||
-    null
-  );
-}
 
 const STATUS_COLORS = {
   reservation: "#900546",
@@ -118,7 +59,9 @@ export function AvailabilityCalendar() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
 
-  const { data: rooms = [], isLoading: roomsLoading } = useQuery<roomInterface[]>({
+  const { data: rooms = [], isLoading: roomsLoading } = useQuery<
+    roomInterface[]
+  >({
     queryKey: ["rooms"],
     queryFn: async () => {
       const res = await axiosInstance.get("/room");
@@ -126,7 +69,9 @@ export function AvailabilityCalendar() {
     },
   });
 
-  const { data: bookings = [], isLoading: bookingsLoading } = useQuery<bookingInterface[]>({
+  const { data: bookings = [], isLoading: bookingsLoading } = useQuery<
+    bookingInterface[]
+  >({
     queryKey: ["bookings"],
     queryFn: async () => {
       const res = await axiosInstance.get("/booking");
@@ -143,37 +88,33 @@ export function AvailabilityCalendar() {
     return arr;
   }, [year, month, daysInMonth]);
 
-  const isCurrentMonth = year === new Date().getFullYear() && month === new Date().getMonth();
+  const isCurrentMonth =
+    year === new Date().getFullYear() && month === new Date().getMonth();
 
-  const bookingsByRoomAndDay = useMemo(() => {
-    const map = new Map<string, Map<string, bookingInterface[]>>();
-    for (const b of bookings) {
-      const roomId = typeof b.room === "string" ? b.room : b.room?._id;
-      if (!roomId) continue;
-      if (!map.has(roomId)) map.set(roomId, new Map());
-      const byDay = map.get(roomId)!;
-      for (const key of bookingDayKeys(b)) {
-        if (!byDay.has(key)) byDay.set(key, []);
-        byDay.get(key)!.push(b);
-      }
-    }
-    return map;
-  }, [bookings]);
+  const roomDayIndex = useMemo(() => buildRoomDayIndex(bookings), [bookings]);
 
   const totalRooms = rooms.length;
-  const maintenanceCount = rooms.filter((r) => r.status === "maintenance").length;
+  const maintenanceCount = rooms.filter(
+    (r) => r.status === "maintenance",
+  ).length;
   const occupiedCount = rooms.filter((r) => r.status === "occupied").length;
   const availableCount = rooms.filter((r) => r.status === "available").length;
 
   const todayArrivals = useMemo(() => {
     const tk = todayKey();
-    return bookings.filter((b) => b.arrivalDate === tk && (b.status === "reservation" || b.status === "active"));
+    return bookings.filter(
+      (b) =>
+        b.arrivalDate === tk &&
+        (b.status === "reservation" || b.status === "active"),
+    );
   }, [bookings]);
 
   const monthArrivals = useMemo(() => {
     const prefix = `${year}-${pad(month + 1)}-`;
     return bookings.filter(
-      (b) => b.arrivalDate?.startsWith(prefix) && (b.status === "reservation" || b.status === "active")
+      (b) =>
+        b.arrivalDate?.startsWith(prefix) &&
+        (b.status === "reservation" || b.status === "active"),
     ).length;
   }, [bookings, year, month]);
 
@@ -221,10 +162,82 @@ export function AvailabilityCalendar() {
       );
     }
 
-    const dayBookings = bookingsByRoomAndDay.get(room._id)?.get(key) || [];
-    const relevant = dayBookings.filter((b) => ["reservation", "active", "completed"].includes(b.status));
+    const entry = roomDayIndex.get(room._id);
+    const nightBookings = entry?.nights.get(key) || [];
+    const arrivals = entry?.arrivals.get(key) || [];
+    const departures = entry?.departures.get(key) || [];
 
-    if (relevant.length === 0) {
+    const staying = nightBookings.filter((b) =>
+      ["reservation", "active", "completed"].includes(b.status),
+    );
+    const arrivingToday = arrivals.filter(
+      (b) => b.status === "active" || b.status === "reservation",
+    );
+
+    const timeSuffix = (b: bookingInterface) =>
+      b.arrivalTime ? ` ${formatTime12hr(b.arrivalTime)}` : "";
+
+    const describe = (b: bookingInterface) =>
+      `${b.clientName} (${b.status})${b.arrivalDate ? ` ${b.arrivalDate}` : ""}${
+        b.departureDate ? ` → ${b.departureDate}` : ""
+      }`;
+
+    if (departures.length > 0 && arrivingToday.length > 0) {
+      const inbound = primaryBooking(arrivingToday)!;
+      const inboundIsCheckedIn = inbound.status === "active";
+      const inboundColor = inboundIsCheckedIn ? "#618685" : "#900546";
+      const inboundLabel = inboundIsCheckedIn ? "IN" : "RSV";
+
+      return (
+        <div
+          className={
+            "flex h-7 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
+            (isToday ? " ring-2 ring-[#900546]/50" : "")
+          }
+          title={
+            `Same-day turnover on ${key}\n` +
+            `Check-out: ${departures.map(describe).join(", ")}\n` +
+            `Check-in: ${arrivingToday.map(describe).join(", ")}${timeSuffix(inbound)}`
+          }
+        >
+          <div
+            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            style={{ backgroundColor: "#9e938f" }}
+          >
+            OUT
+          </div>
+          <div
+            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            style={{ backgroundColor: inboundColor }}
+          >
+            {inboundLabel}
+          </div>
+        </div>
+      );
+    }
+
+    if (departures.length > 0 && staying.length === 0) {
+      return (
+        <div
+          className={
+            "flex h-7 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
+            (isToday ? " ring-2 ring-[#900546]/50" : "") +
+            (isPast ? " opacity-60" : "")
+          }
+          title={`Check-out on ${key}\n${departures.map(describe).join(", ")}\nRoom is free from this day.`}
+        >
+          <div
+            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            style={{ backgroundColor: "#9e938f" }}
+          >
+            OUT
+          </div>
+          <div className="flex-1 bg-transparent ring-1 ring-inset ring-[#D9C3C3] dark:ring-white/15" />
+        </div>
+      );
+    }
+
+    if (staying.length === 0) {
       // Fall back to the room's live status when no booking spans today (e.g.
       // stale status or a walk-in without a booking record).
       if (isToday && room.status === "occupied") {
@@ -251,27 +264,52 @@ export function AvailabilityCalendar() {
       }
       return (
         <div
-          className={"h-7 rounded-md transition-colors" + (isToday ? " bg-[#900546]/10 ring-2 ring-[#900546]/40" : isPast ? "" : " hover:bg-muted")}
+          className={
+            "h-7 rounded-md transition-colors" +
+            (isToday
+              ? " bg-[#900546]/10 ring-2 ring-[#900546]/40"
+              : isPast
+                ? ""
+                : " hover:bg-muted")
+          }
         />
       );
     }
 
-    const statusBooking = primaryBooking(relevant)!;
+    const statusBooking = primaryBooking(staying)!;
     const isCheckedIn = statusBooking.status === "active";
     const isDeparted = statusBooking.status === "completed";
     const status = statusBooking.status as keyof typeof STATUS_COLORS;
-    const color = isCheckedIn ? "#618685" : isDeparted ? "#9e938f" : STATUS_COLORS[status] || "#900546";
-    const label = isCheckedIn ? "IN" : isDeparted ? "OUT" : "RSV";
+    const color = isCheckedIn
+      ? "#618685"
+      : isDeparted
+        ? "#9e938f"
+        : STATUS_COLORS[status] || "#900546";
+    const isArrivalDay = statusBooking.arrivalDate === key;
+    const label = isDeparted
+      ? "STAY"
+      : isCheckedIn
+        ? "IN"
+        : isArrivalDay
+          ? "RSV"
+          : "STAY";
     const guestFirst = statusBooking.clientName?.split(" ")[0] || "Guest";
-    const title = `${relevant.map((b) => `${b.clientName} (${b.status})`).join(", ")}\nArrival: ${key} ${formatTime12hr(statusBooking.arrivalTime)}`;
+    const title = `${staying.map(describe).join(", ")}\nArrival: ${statusBooking.arrivalDate} ${formatTime12hr(statusBooking.arrivalTime)}${
+      statusBooking.departureDate
+        ? `\nCheck-out: ${statusBooking.departureDate}`
+        : ""
+    }`;
 
     return (
       <div
-        className={"flex items-center justify-center gap-0.5 h-7 rounded-md text-white text-[10px] font-bold cursor-default transition-transform hover:scale-105" + (isToday ? " ring-2 ring-[#900546]/50" : "")}
+        className={
+          "flex items-center justify-center gap-0.5 h-7 rounded-md text-white text-[10px] font-bold cursor-default transition-transform hover:scale-105" +
+          (isToday ? " ring-2 ring-[#900546]/50" : "")
+        }
         style={{ backgroundColor: color }}
         title={title}
       >
-        <span>{`${label}${statusBooking.arrivalTime && !isDeparted ? ` ${formatTime12hr(statusBooking.arrivalTime)}` : ""}`}</span>
+        <span>{`${label}${isArrivalDay && statusBooking.arrivalTime && !isDeparted ? ` ${formatTime12hr(statusBooking.arrivalTime)}` : ""}`}</span>
         <span className="hidden xl:inline">{` ${guestFirst.slice(0, 3)}`}</span>
       </div>
     );
@@ -287,9 +325,12 @@ export function AvailabilityCalendar() {
           </h1>
 
           <h1 className="text-2xl mt-2 font-semibold">Calendar</h1>
-          
+
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-2">
-            Daily room status per arrival. Markers show reservations (RSV), checked-in guests (IN) and departed stays (OUT) with their arrival time.
+            Daily room status. Markers show reservations (RSV), checked-in
+            guests (IN), held nights (STAY) and check-outs (OUT). A split cell
+            means a same-day turnover — one guest checks out and the next checks
+            in on that date.
           </p>
         </div>
 
@@ -325,7 +366,10 @@ export function AvailabilityCalendar() {
           {MONTH_NAMES[month]} {year}
         </h2>
         <span className="text-xs text-[#5C454B] dark:text-gray-400">
-          <strong className="text-[#900546] dark:text-[#F968AC]">{monthArrivals}</strong> expected arrival{monthArrivals !== 1 ? "s" : ""} this month
+          <strong className="text-[#900546] dark:text-[#F968AC]">
+            {monthArrivals}
+          </strong>{" "}
+          expected arrival{monthArrivals !== 1 ? "s" : ""} this month
         </span>
       </div>
 
@@ -333,57 +377,113 @@ export function AvailabilityCalendar() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-xl border border-border bg-card p-4.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Rooms</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Total Rooms
+            </span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-[#900546]/10 text-[#900546] dark:text-[#F968AC]">
               <BedDouble className="size-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-foreground mt-2">{totalRooms}</p>
+          <p className="text-2xl font-bold text-foreground mt-2">
+            {totalRooms}
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Available</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Available
+            </span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <BedDouble className="size-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-foreground mt-2">{availableCount}</p>
+          <p className="text-2xl font-bold text-foreground mt-2">
+            {availableCount}
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Checked-in / Due</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Checked-in / Due
+            </span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-[#618685]/10 text-[#618685] dark:text-[#90b8b7]">
               <UserCheck className="size-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-foreground mt-2">{occupiedCount}</p>
+          <p className="text-2xl font-bold text-foreground mt-2">
+            {occupiedCount}
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Maintenance</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Maintenance
+            </span>
             <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
               <Wrench className="size-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-foreground mt-2">{maintenanceCount}</p>
+          <p className="text-2xl font-bold text-foreground mt-2">
+            {maintenanceCount}
+          </p>
         </div>
       </div>
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#5C454B] dark:text-gray-400">
-        <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ backgroundColor: "#900546" }} /> Paid Reservation</span>
-        <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ backgroundColor: "#F968AC" }} /> Unpaid Reservation</span>
-        <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm" style={{ backgroundColor: "#618685" }} /> Checked-in</span>
-        <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm bg-amber-400/60" /> Maintenance</span>
-        <span className="inline-flex items-center gap-1.5"><span className="size-3 rounded-sm bg-transparent ring-1 ring-[#D9C3C3] dark:ring-white/20" /> Available</span>
-        <span className="inline-flex items-center gap-1.5"><CircleDot className="size-3 text-[#900546]" /> Today</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="size-3 rounded-sm"
+            style={{ backgroundColor: "#900546" }}
+          />{" "}
+          Paid Reservation
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="size-3 rounded-sm"
+            style={{ backgroundColor: "#F968AC" }}
+          />{" "}
+          Unpaid Reservation
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="size-3 rounded-sm"
+            style={{ backgroundColor: "#618685" }}
+          />{" "}
+          Checked-in
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="size-3 rounded-sm"
+            style={{ backgroundColor: "#9e938f" }}
+          />{" "}
+          Check-out (OUT)
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex size-3 overflow-hidden rounded-sm">
+            <span className="w-1/2" style={{ backgroundColor: "#9e938f" }} />
+            <span className="w-1/2" style={{ backgroundColor: "#900546" }} />
+          </span>
+          Same-day turnover
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-3 rounded-sm bg-amber-400/60" /> Maintenance
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-3 rounded-sm bg-transparent ring-1 ring-[#D9C3C3] dark:ring-white/20" />{" "}
+          Available
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <CircleDot className="size-3 text-[#900546]" /> Today
+        </span>
       </div>
 
       {todayArrivals.length > 0 && (
         <div className="flex items-center gap-3 rounded-xl border border-[#900546]/20 bg-[#900546]/5 px-4 py-3 text-xs text-[#900546] dark:text-[#F968AC]">
           <Clock className="size-4 shrink-0" />
           <span>
-            <strong>{todayArrivals.length}</strong> arrival{todayArrivals.length > 1 ? "s" : ""} scheduled today:{" "}
+            <strong>{todayArrivals.length}</strong> arrival
+            {todayArrivals.length > 1 ? "s" : ""} scheduled today:{" "}
             {todayArrivals.map((b) => b.clientName).join(", ")}
           </span>
         </div>
@@ -407,12 +507,27 @@ export function AvailabilityCalendar() {
                       key={d}
                       className={
                         "px-0.5 py-1.5 text-center align-bottom" +
-                        (isToday ? " bg-[#900546]/10" : isWeekend ? " bg-[#900546]/5" : "") +
-                        (isWeekend && !isToday ? " text-[#900546]/80 dark:text-[#F968AC]/80" : " text-muted-foreground")
+                        (isToday
+                          ? " bg-[#900546]/10"
+                          : isWeekend
+                            ? " bg-[#900546]/5"
+                            : "") +
+                        (isWeekend && !isToday
+                          ? " text-[#900546]/80 dark:text-[#F968AC]/80"
+                          : " text-muted-foreground")
                       }
                     >
-                      <span className="block text-[9px] font-medium opacity-70">{WEEKDAYS[date.getDay()]}</span>
-                      <span className={"block text-[11px] font-bold" + (isToday ? " text-[#900546] dark:text-[#F968AC]" : "")}>{d}</span>
+                      <span className="block text-[9px] font-medium opacity-70">
+                        {WEEKDAYS[date.getDay()]}
+                      </span>
+                      <span
+                        className={
+                          "block text-[11px] font-bold" +
+                          (isToday ? " text-[#900546] dark:text-[#F968AC]" : "")
+                        }
+                      >
+                        {d}
+                      </span>
                     </th>
                   );
                 })}
@@ -431,29 +546,45 @@ export function AvailabilityCalendar() {
                 <tr>
                   <td colSpan={daysInMonth + 1} className="p-10 text-center">
                     <Info className="size-6 text-muted-foreground mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No rooms have been added yet.</p>
+                    <p className="text-sm text-muted-foreground">
+                      No rooms have been added yet.
+                    </p>
                   </td>
                 </tr>
               ) : (
                 rooms.map((room, ri) => (
-                  <tr key={room._id} className={ri % 2 === 1 ? "bg-muted/30" : ""}>
+                  <tr
+                    key={room._id}
+                    className={ri % 2 === 1 ? "bg-muted/30" : ""}
+                  >
                     <td className="sticky left-0 z-10 bg-card px-3 py-1.5 border-b border-border/60">
                       <div className="flex items-center gap-1.5">
                         <CircleDot
                           className="size-2.5 shrink-0"
-                          style={{ color: ROOM_STATUS_DOT[room.status] || "#9ca3af" }}
+                          style={{
+                            color: ROOM_STATUS_DOT[room.status] || "#9ca3af",
+                          }}
                         />
                         <p className="font-bold text-foreground truncate">
-                          {room.roomNumber ? `Unit ${room.roomNumber}` : "Suite"}
-                          <span className="text-muted-foreground font-medium"> · {room.category}</span>
+                          {room.roomNumber
+                            ? `Unit ${room.roomNumber}`
+                            : "Suite"}
+                          <span className="text-muted-foreground font-medium">
+                            {" "}
+                            · {room.category}
+                          </span>
                         </p>
                       </div>
                       <p className="text-[10px] text-muted-foreground pl-4">
-                        ₱{room.price.toLocaleString()}/night{room.discount > 0 ? ` · ${room.discount}% off` : ""}
+                        ₱{room.price.toLocaleString()}/night
+                        {room.discount > 0 ? ` · ${room.discount}% off` : ""}
                       </p>
                     </td>
                     {days.map((d) => (
-                      <td key={d} className="px-0.5 py-1 border-b border-border/60">
+                      <td
+                        key={d}
+                        className="px-0.5 py-1 border-b border-border/60"
+                      >
                         {renderCell(room, d)}
                       </td>
                     ))}

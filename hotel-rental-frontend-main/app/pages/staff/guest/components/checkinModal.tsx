@@ -17,14 +17,32 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Loader2, LogIn, Check, ChevronLeft, ChevronRight, Bed, Users } from "lucide-react";
+import {
+  Loader2,
+  LogIn,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Bed,
+  Users,
+} from "lucide-react";
+import {
+  validateBookingForm,
+  nightsBetween,
+  todayDateStr,
+  addDays,
+  apiErrorMessage,
+  FieldErrors,
+  MAX_STAY_NIGHTS,
+} from "@/app/utils/bookingValidation";
 
 function getTodayDate() {
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const dd = String(today.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return todayDateStr();
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-[11px] font-medium text-destructive">{message}</p>;
 }
 
 function getNextIncrementedTime(intervalMinutes = 5) {
@@ -47,23 +65,27 @@ export function CheckinModal() {
   const [clientPhone, setClientPhone] = useState("");
   const [arrivalDate, setArivalDate] = useState(getTodayDate());
   const [arrivalTime, setArivalTime] = useState(getNextIncrementedTime(5));
+  const [departureDate, setDepartureDate] = useState(
+    addDays(getTodayDate(), 1),
+  );
+  const [guests, setGuests] = useState("1");
   const [selectedRoom, setSelectedRoom] = useState("");
+  const [errors, setErrors] = useState<FieldErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+  const submitLock = useRef(false);
 
   // Sync state whenever modal is opened
   useEffect(() => {
     if (open) {
-      setArivalDate(getTodayDate());
+      const today = getTodayDate();
+      setArivalDate(today);
       setArivalTime(getNextIncrementedTime(5));
+      setDepartureDate(addDays(today, 1));
+      setErrors({});
+      setSubmitted(false);
+      submitLock.current = false;
     }
   }, [open]);
-
-  // Check if selected time is in the past for today
-  const isTimeInPast = useMemo(() => {
-    if (arrivalDate !== getTodayDate() || !arrivalTime) return false;
-    const [h, m] = arrivalTime.split(":").map(Number);
-    const now = new Date();
-    return h < now.getHours() || (h === now.getHours() && m < now.getMinutes());
-  }, [arrivalDate, arrivalTime]);
 
   // Fetch all rooms and filter to "available" only
   const { data: rooms, isLoading: roomsLoading } = useQuery<roomInterface[]>({
@@ -74,9 +96,45 @@ export function CheckinModal() {
     },
   });
 
-  const availableRooms = rooms?.filter(
-    (room) => room.status === "available"
-  ) ?? [];
+  const availableRooms =
+    rooms?.filter((room) => room.status === "available") ?? [];
+
+  const selectedRoomDoc = rooms?.find((room) => room._id === selectedRoom);
+
+  const formValues = useMemo(
+    () => ({
+      clientName,
+      clientAddress,
+      clientEmail,
+      clientPhone,
+      arrivalDate,
+      arrivalTime,
+      departureDate,
+      guests,
+    }),
+    [
+      clientName,
+      clientAddress,
+      clientEmail,
+      clientPhone,
+      arrivalDate,
+      arrivalTime,
+      departureDate,
+      guests,
+    ],
+  );
+
+  const liveErrors = useMemo(() => {
+    const result = validateBookingForm(formValues, {
+      requireEmail: false,
+      maxHead: selectedRoomDoc?.maxHead,
+    });
+    if (!selectedRoom) result.room = "Please select an available room.";
+    return result;
+  }, [formValues, selectedRoomDoc?.maxHead, selectedRoom]);
+
+  const visibleErrors = submitted ? liveErrors : errors;
+  const nights = nightsBetween(arrivalDate, departureDate);
 
   const createBookingMutation = useMutation({
     mutationFn: (data: {
@@ -87,20 +145,23 @@ export function CheckinModal() {
       type: string;
       status: string;
       arrivalDate: string;
+      departureDate: string;
       arrivalTime: string;
+      guests: number;
       room: string;
     }) => axiosInstance.post("/booking", data),
     onSuccess: () => {
       successAlert("Guest checked in successfully.");
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["bookings"] });
       resetForm();
       setOpen(false);
+      submitLock.current = false;
     },
-    onError: (err: { response?: { data?: { message?: string } } }) => {
-      const message =
-        err.response?.data?.message || "Failed to check in guest.";
-      errorAlert(message);
+    onError: (err: unknown) => {
+      errorAlert(apiErrorMessage(err, "Failed to check in guest."));
+      submitLock.current = false;
     },
   });
 
@@ -111,7 +172,11 @@ export function CheckinModal() {
     setClientPhone("");
     setArivalDate(getTodayDate());
     setArivalTime(getNextIncrementedTime(5));
+    setDepartureDate(addDays(getTodayDate(), 1));
+    setGuests("1");
     setSelectedRoom("");
+    setErrors({});
+    setSubmitted(false);
   };
 
   const handleDateChange = (newDate: string) => {
@@ -119,9 +184,15 @@ export function CheckinModal() {
     if (newDate === getTodayDate()) {
       const now = new Date();
       const [h, m] = arrivalTime.split(":").map(Number);
-      if (h < now.getHours() || (h === now.getHours() && m < now.getMinutes())) {
+      if (
+        h < now.getHours() ||
+        (h === now.getHours() && m < now.getMinutes())
+      ) {
         setArivalTime(getNextIncrementedTime(5));
       }
+    }
+    if (!departureDate || nightsBetween(newDate, departureDate) < 1) {
+      setDepartureDate(addDays(newDate, 1));
     }
   };
 
@@ -135,34 +206,50 @@ export function CheckinModal() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!clientName || !clientAddress || !arrivalDate || !arrivalTime || !selectedRoom) {
-      errorAlert("Please fill in all required fields.");
+    if (submitLock.current || createBookingMutation.isPending) return;
+
+    setSubmitted(true);
+    setErrors(liveErrors);
+
+    if (Object.keys(liveErrors).length > 0) {
+      errorAlert(
+        liveErrors.room ||
+          "Please correct the highlighted fields before checking in.",
+      );
       return;
     }
 
-    // Validate that arrival date & time is not in the past
-    const [year, month, day] = arrivalDate.split("-").map(Number);
-    const [hours, minutes] = arrivalTime.split(":").map(Number);
-    const arrivalDateTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
-    const now = new Date();
+    submitLock.current = true;
 
-    if (arrivalDateTime.getTime() < now.getTime() - 2 * 60 * 1000) {
-      errorAlert("Arrival date and time cannot be in the past.");
+    try {
+      const fresh = await axiosInstance.get(`/room/${selectedRoom}`);
+      const status = fresh.data?.status;
+      if (status && status !== "available") {
+        errorAlert(`This room is currently ${status} and cannot be assigned.`);
+        queryClient.invalidateQueries({ queryKey: ["rooms"] });
+        submitLock.current = false;
+        return;
+      }
+    } catch {
+      errorAlert("Could not confirm room availability. Please try again.");
+      submitLock.current = false;
       return;
     }
 
     createBookingMutation.mutate({
-      clientName,
-      clientAddress,
-      clientEmail,
-      clientPhone,
+      clientName: clientName.trim(),
+      clientAddress: clientAddress.trim(),
+      clientEmail: clientEmail.trim(),
+      clientPhone: clientPhone.trim(),
       type: "walk in",
       status: "active",
       arrivalDate,
+      departureDate,
       arrivalTime,
+      guests: Number(guests),
       room: selectedRoom,
     });
   };
@@ -186,7 +273,7 @@ export function CheckinModal() {
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5" noValidate>
           {/* Client Name */}
           <div className="space-y-2">
             <Label htmlFor="clientName">
@@ -197,8 +284,10 @@ export function CheckinModal() {
               placeholder="e.g. John Doe"
               value={clientName}
               onChange={(e) => setClientName(e.target.value)}
-              required
+              aria-invalid={!!visibleErrors.clientName}
+              maxLength={80}
             />
+            <FieldError message={visibleErrors.clientName} />
           </div>
 
           {/* Client Address */}
@@ -211,35 +300,43 @@ export function CheckinModal() {
               placeholder="e.g. 123 Main St, City"
               value={clientAddress}
               onChange={(e) => setClientAddress(e.target.value)}
-              required
+              aria-invalid={!!visibleErrors.clientAddress}
+              maxLength={160}
             />
+            <FieldError message={visibleErrors.clientAddress} />
           </div>
 
           {/* Client Email & Phone - same row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="clientEmail">
-                Client Email
-              </Label>
+              <Label htmlFor="clientEmail">Client Email</Label>
               <Input
                 id="clientEmail"
                 type="email"
                 placeholder="e.g. john@email.com"
                 value={clientEmail}
                 onChange={(e) => setClientEmail(e.target.value)}
+                aria-invalid={!!visibleErrors.clientEmail}
               />
+              <FieldError message={visibleErrors.clientEmail} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="clientPhone">
-                Client Phone
-              </Label>
+              <Label htmlFor="clientPhone">Client Phone</Label>
               <Input
                 id="clientPhone"
                 type="tel"
                 placeholder="e.g. 0917 123 4567"
                 value={clientPhone}
                 onChange={(e) => setClientPhone(e.target.value)}
+                aria-invalid={!!visibleErrors.clientPhone}
               />
+              {visibleErrors.clientPhone ? (
+                <FieldError message={visibleErrors.clientPhone} />
+              ) : (
+                <p className="text-[10px] text-muted-foreground">
+                  An email address or a contact number is required.
+                </p>
+              )}
             </div>
           </div>
 
@@ -255,8 +352,9 @@ export function CheckinModal() {
                 min={getTodayDate()}
                 value={arrivalDate}
                 onChange={(e) => handleDateChange(e.target.value)}
-                required
+                aria-invalid={!!visibleErrors.arrivalDate}
               />
+              <FieldError message={visibleErrors.arrivalDate} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="arrivalTime">
@@ -266,16 +364,65 @@ export function CheckinModal() {
                 id="arrivalTime"
                 type="time"
                 step="300"
-                min={arrivalDate === getTodayDate() ? getNextIncrementedTime(5) : undefined}
                 value={arrivalTime}
                 onChange={(e) => setArivalTime(e.target.value)}
-                required
-                className={isTimeInPast ? "border-destructive focus-visible:ring-destructive" : ""}
+                aria-invalid={!!visibleErrors.arrivalTime}
               />
-              {isTimeInPast ? (
-                <p className="text-[11px] text-destructive font-medium">Time cannot be in the past today</p>
+              {visibleErrors.arrivalTime ? (
+                <FieldError message={visibleErrors.arrivalTime} />
               ) : (
-                <p className="text-[10px] text-muted-foreground">Increments in 5-minute intervals</p>
+                <p className="text-[10px] text-muted-foreground">
+                  Increments in 5-minute intervals
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="departureDate">
+                Check-out Date <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="departureDate"
+                type="date"
+                min={addDays(arrivalDate || getTodayDate(), 1)}
+                value={departureDate}
+                onChange={(e) => setDepartureDate(e.target.value)}
+                aria-invalid={!!visibleErrors.departureDate}
+              />
+              {visibleErrors.departureDate ? (
+                <FieldError message={visibleErrors.departureDate} />
+              ) : (
+                <p className="text-[10px] text-muted-foreground">
+                  {nights > 0
+                    ? `${nights} night${nights === 1 ? "" : "s"} (max ${MAX_STAY_NIGHTS})`
+                    : "Must be at least one night after check-in"}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guests">
+                Number of Guests <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="guests"
+                type="number"
+                min={1}
+                max={selectedRoomDoc?.maxHead || 20}
+                step={1}
+                value={guests}
+                onChange={(e) => setGuests(e.target.value)}
+                aria-invalid={!!visibleErrors.guests}
+              />
+              {visibleErrors.guests ? (
+                <FieldError message={visibleErrors.guests} />
+              ) : (
+                <p className="text-[10px] text-muted-foreground">
+                  {selectedRoomDoc
+                    ? `Maximum ${selectedRoomDoc.maxHead || 2} guest(s) for this room`
+                    : "Select a room to see its capacity"}
+                </p>
               )}
             </div>
           </div>
@@ -288,7 +435,8 @@ export function CheckinModal() {
               </Label>
               {!roomsLoading && availableRooms.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {availableRooms.length} room{availableRooms.length !== 1 && "s"} available
+                  {availableRooms.length} room
+                  {availableRooms.length !== 1 && "s"} available
                 </span>
               )}
             </div>
@@ -304,7 +452,9 @@ export function CheckinModal() {
               <div className="flex flex-col items-center justify-center py-12 rounded-lg border border-dashed border-border text-muted-foreground">
                 <Bed className="size-8 mb-2" />
                 <p className="text-sm font-medium">No available rooms</p>
-                <p className="text-xs mt-1">All rooms are currently occupied or under maintenance.</p>
+                <p className="text-xs mt-1">
+                  All rooms are currently occupied or under maintenance.
+                </p>
               </div>
             ) : (
               <div className="relative group">
@@ -332,9 +482,10 @@ export function CheckinModal() {
                 >
                   {availableRooms.map((room) => {
                     const isSelected = selectedRoom === room._id;
-                    const discountedPrice = room.discount > 0
-                      ? Math.round(room.price * (1 - room.discount / 100))
-                      : room.price;
+                    const discountedPrice =
+                      room.discount > 0
+                        ? Math.round(room.price * (1 - room.discount / 100))
+                        : room.price;
 
                     return (
                       <button
@@ -343,9 +494,10 @@ export function CheckinModal() {
                         onClick={() => setSelectedRoom(room._id)}
                         className={`
                           relative flex-shrink-0 w-[190px] rounded-xl border-2 text-left transition-all duration-200 overflow-hidden
-                          ${isSelected
-                            ? "border-green-500 bg-green-50/50 dark:bg-green-950/20 shadow-md shadow-green-500/10 ring-1 ring-green-500"
-                            : "border-border bg-card hover:border-muted-foreground/40 hover:shadow-sm"
+                          ${
+                            isSelected
+                              ? "border-green-500 bg-green-50/50 dark:bg-green-950/20 shadow-md shadow-green-500/10 ring-1 ring-green-500"
+                              : "border-border bg-card hover:border-muted-foreground/40 hover:shadow-sm"
                           }
                         `}
                       >
@@ -382,11 +534,18 @@ export function CheckinModal() {
                         <div className="p-2.5 space-y-1.5">
                           {/* Room Number & Category */}
                           <div className="space-y-0.5">
-                            <p className="text-xs font-bold text-foreground truncate" title={`${room.roomNumber ? `Room ${room.roomNumber} · ` : ""}${room.category}`}>
-                              {room.roomNumber ? `Room ${room.roomNumber}` : room.category}
+                            <p
+                              className="text-xs font-bold text-foreground truncate"
+                              title={`${room.roomNumber ? `Room ${room.roomNumber} · ` : ""}${room.category}`}
+                            >
+                              {room.roomNumber
+                                ? `Room ${room.roomNumber}`
+                                : room.category}
                             </p>
                             {room.roomNumber ? (
-                              <p className="text-[10px] text-muted-foreground truncate">{room.category}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">
+                                {room.category}
+                              </p>
                             ) : null}
                           </div>
 
@@ -395,7 +554,9 @@ export function CheckinModal() {
                             <span className="text-xs font-bold text-primary">
                               ₱{discountedPrice.toLocaleString()}
                             </span>
-                            <span className="text-[10px] text-muted-foreground">/ night</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              / night
+                            </span>
                             {room.discount > 0 && (
                               <span className="text-[10px] text-muted-foreground line-through ml-auto">
                                 ₱{room.price.toLocaleString()}
@@ -410,9 +571,13 @@ export function CheckinModal() {
                               {room.maxHead || 2} Guests
                             </span>
                             {room.amenities && room.amenities.length > 0 && (
-                              <span className="truncate max-w-[80px]" title={room.amenities.join(", ")}>
+                              <span
+                                className="truncate max-w-[80px]"
+                                title={room.amenities.join(", ")}
+                              >
                                 {room.amenities[0]}
-                                {room.amenities.length > 1 && ` +${room.amenities.length - 1}`}
+                                {room.amenities.length > 1 &&
+                                  ` +${room.amenities.length - 1}`}
                               </span>
                             )}
                           </div>
@@ -423,6 +588,8 @@ export function CheckinModal() {
                 </div>
               </div>
             )}
+
+            <FieldError message={visibleErrors.room} />
           </div>
 
           <DialogFooter className="pt-2">
@@ -438,7 +605,11 @@ export function CheckinModal() {
             </Button>
             <Button
               type="submit"
-              disabled={createBookingMutation.isPending || roomsLoading}
+              disabled={
+                createBookingMutation.isPending ||
+                roomsLoading ||
+                availableRooms.length === 0
+              }
             >
               {createBookingMutation.isPending ? (
                 <>

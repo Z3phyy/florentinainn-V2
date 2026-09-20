@@ -69,7 +69,13 @@ function PaymentSuccessContent() {
   const [paymentError, setPaymentError] = useState(false);
 
   useEffect(() => {
-    if (bookingId && amount && !hasCalled && sessionId && bookingInfo?.clientName) {
+    if (
+      bookingId &&
+      amount &&
+      !hasCalled &&
+      sessionId &&
+      bookingInfo?.clientName
+    ) {
       paymentMutation.mutate(
         {
           bookingId,
@@ -87,7 +93,7 @@ function PaymentSuccessContent() {
           onError: () => {
             setPaymentError(true);
           },
-        }
+        },
       );
     }
   }, [bookingInfo, bookingId, amount, gateway, sessionId, hasCalled]);
@@ -125,7 +131,8 @@ function PaymentSuccessContent() {
                 alt={hotelName}
                 className="size-full object-contain"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                  (e.target as HTMLImageElement).src =
+                    "/Florentina Inn Logo.png";
                 }}
               />
             </div>
@@ -176,7 +183,8 @@ function PaymentSuccessContent() {
                       Payment Could Not Be Verified
                     </h1>
                     <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
-                      We were unable to confirm your payment with the gateway. Please contact the front desk with your reference.
+                      We were unable to confirm your payment with the gateway.
+                      Please contact the front desk with your reference.
                     </p>
                   </>
                 ) : (
@@ -185,12 +193,16 @@ function PaymentSuccessContent() {
                       <ShieldCheck className="size-3.5" />
                       Payment Confirmed & Verified
                     </div>
-                <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
-                  Reservation Confirmed!
-                </h1>
-                <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
-                  Thank you, <strong className="text-[#130005] dark:text-white">{bookingInfo?.clientName || "valued guest"}</strong>. Your suite is reserved at Florentina Inn.
-                </p>
+                    <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
+                      Reservation Confirmed!
+                    </h1>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
+                      Thank you,{" "}
+                      <strong className="text-[#130005] dark:text-white">
+                        {bookingInfo?.clientName || "valued guest"}
+                      </strong>
+                      . Your suite is reserved at Florentina Inn.
+                    </p>
                   </>
                 )}
               </div>
@@ -211,7 +223,9 @@ function PaymentSuccessContent() {
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="font-serif text-sm font-bold text-[#130005] dark:text-white truncate">
-                      {bookingInfo.room.roomNumber ? `Room ${bookingInfo.room.roomNumber} · ` : ""}
+                      {bookingInfo.room.roomNumber
+                        ? `Room ${bookingInfo.room.roomNumber} · `
+                        : ""}
                       {bookingInfo.room.category}
                     </p>
                     <p className="text-xs font-semibold text-[#900546] dark:text-[#F968AC] mt-0.5">
@@ -219,7 +233,13 @@ function PaymentSuccessContent() {
                     </p>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-1 flex items-center gap-1">
                       <Clock className="size-3 text-[#618685]" />
-                      Arrival: {bookingInfo.arrivalDate ? new Date(bookingInfo.arrivalDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Flexible"}
+                      Arrival:{" "}
+                      {bookingInfo.arrivalDate
+                        ? new Date(bookingInfo.arrivalDate).toLocaleDateString(
+                            "en-US",
+                            { month: "short", day: "numeric", year: "numeric" },
+                          )
+                        : "Flexible"}
                     </p>
                   </div>
                 </div>
@@ -232,7 +252,8 @@ function PaymentSuccessContent() {
                   Flexible 24/7 Anytime Check-in
                 </p>
                 <p className="text-[11px] text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                  Our front desk reception is staffed 24 hours daily. Please show this voucher or state your reservation name upon arrival.
+                  Our front desk reception is staffed 24 hours daily. Please
+                  show this voucher or state your reservation name upon arrival.
                 </p>
               </div>
 
@@ -258,7 +279,11 @@ function PaymentSuccessContent() {
             >
               {/* Watermark Logo in Voucher background */}
               <div className="pointer-events-none absolute right-4 bottom-4 size-48 opacity-[0.03] select-none">
-                <img src={logoUrl} alt="" className="size-full object-contain" />
+                <img
+                  src={logoUrl}
+                  alt=""
+                  className="size-full object-contain"
+                />
               </div>
 
               {/* Voucher Header */}
@@ -270,7 +295,8 @@ function PaymentSuccessContent() {
                       alt={hotelName}
                       className="size-full object-contain"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                        (e.target as HTMLImageElement).src =
+                          "/Florentina Inn Logo.png";
                       }}
                     />
                   </div>
@@ -289,7 +315,10 @@ function PaymentSuccessContent() {
                     OFFICIAL VOUCHER
                   </span>
                   <p className="text-[11px] font-mono font-bold text-[#130005] dark:text-white mt-1.5">
-                    REF: {bookingId ? `RSV-${bookingId.slice(-8).toUpperCase()}` : "RSV-ONLINE"}
+                    REF:{" "}
+                    {bookingId
+                      ? `RSV-${bookingId.slice(-8).toUpperCase()}`
+                      : "RSV-ONLINE"}
                   </p>
                 </div>
               </div>
@@ -310,11 +339,14 @@ function PaymentSuccessContent() {
                   </span>
                   <span className="font-bold text-[#130005] dark:text-white">
                     {bookingInfo?.arrivalDate
-                      ? new Date(bookingInfo.arrivalDate).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
+                      ? new Date(bookingInfo.arrivalDate).toLocaleDateString(
+                          "en-US",
+                          {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )
                       : dateStr}
                   </span>
                 </div>
@@ -356,13 +388,36 @@ function PaymentSuccessContent() {
               <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-2 text-xs">
                 <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
                   <span>Room Reservation Rate</span>
-                  <span className="font-medium text-[#130005] dark:text-white">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-medium text-[#130005] dark:text-white">
+                    ₱
+                    {total.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
                 <div className="h-px bg-[#D9C3C3] dark:bg-white/10 my-1" />
                 <div className="flex items-center justify-between text-sm font-bold text-[#130005] dark:text-white">
-                  <span className="font-serif text-[#900546] dark:text-[#F968AC]">Total Amount Paid</span>
-                  <span className="text-[#900546] dark:text-[#F968AC]">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-serif text-[#900546] dark:text-[#F968AC]">
+                    Total Amount Paid
+                  </span>
+                  <span className="text-[#900546] dark:text-[#F968AC]">
+                    ₱
+                    {total.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#900546]/30 bg-[#900546]/5 p-3.5 text-[11px] leading-relaxed text-[#5C454B] dark:text-gray-300">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#900546] dark:text-[#F968AC] mb-0.5">
+                  Non-Refundable Reservation
+                </span>
+                This online reservation is non-refundable. The amount paid is
+                not returned for cancellations, date changes, early departures
+                or no-shows.
               </div>
 
               {/* Complimentary Amenities Included */}
@@ -371,7 +426,9 @@ function PaymentSuccessContent() {
                   Included Amenities & Services
                 </span>
                 <p>
-                  • Airconditioned rooms • Hot & cold shower • Cable TV / DVD • Free WiFi internet • We serve Breakfast • Private Parking • Backup generator
+                  • Airconditioned rooms • Hot & cold shower • Cable TV / DVD •
+                  Free WiFi internet • We serve Breakfast • Private Parking •
+                  Backup generator
                 </p>
               </div>
             </div>
