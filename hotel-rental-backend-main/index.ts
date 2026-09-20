@@ -19,6 +19,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "https://florentina-inn.vercel.app",
+  "https://turbo-spoon-69w7pv74qjq7h4ggj-3000.app.github.dev"
 ];
 
 app.set('trust proxy', 1);

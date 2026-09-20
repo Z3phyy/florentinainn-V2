@@ -357,7 +357,7 @@ export class SystemController {
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
 
      
@@ -396,7 +396,7 @@ export class SystemController {
       const rooms = await RoomService.getAll();
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
       const roomSummary = rooms && rooms.length > 0
         ? rooms.map((r) => `${r.roomNumber ? `Room ${r.roomNumber} (` : ""}${r.category}${r.roomNumber ? ")" : ""}: ₱${r.price.toLocaleString()}/night (Status: ${r.status})`).join(", ")
@@ -617,7 +617,7 @@ Return ONLY the suggested reply message text without any quotes, conversational 
       const { forecastData, baseline, peakMonths, slowMonths, totalForecast, projectedOccupancy } = request.body;
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
       const prompt = `
 You are a senior hotel revenue management and hospitality operations consultant.

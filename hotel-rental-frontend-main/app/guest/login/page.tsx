@@ -10,7 +10,8 @@ import { errorAlert, successAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Lock, Timer } from "lucide-react";
+import { Loader2, Lock, Timer, Eye, EyeOff } from "lucide-react";
+import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 // ── Lockout Configuration ──
 // Change this value to adjust the base lockout duration (in seconds).
@@ -21,6 +22,8 @@ const BASE_LOCKOUT_DELAY = 10; // seconds
 export default function Page() {
   const router = useRouter();
   const { setUser } = useUserStore();
+  const { showPassword, togglePasswordVisibility, passwordInputType } =
+    usePasswordVisibility();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [consecutiveFails, setConsecutiveFails] = useState(0);
@@ -46,7 +49,9 @@ export default function Page() {
       if (e.key === "Enter" && e.altKey) {
         if (adminStatus?.canRegister === false) {
           setShowAdminLink(false);
-          errorAlert("Both Admin and Super Admin accounts are already registered.");
+          errorAlert(
+            "Both Admin and Super Admin accounts are already registered.",
+          );
         } else {
           setShowAdminLink((prev) => !prev);
         }
@@ -67,7 +72,10 @@ export default function Page() {
 
     const lockoutUntil = localStorage.getItem("login_lockout_until");
     if (lockoutUntil) {
-      const remaining = Math.max(0, Math.ceil((Number(lockoutUntil) - Date.now()) / 1000));
+      const remaining = Math.max(
+        0,
+        Math.ceil((Number(lockoutUntil) - Date.now()) / 1000),
+      );
       if (remaining > 0) {
         setLockoutRemaining(remaining);
       } else {
@@ -135,7 +143,7 @@ export default function Page() {
         localStorage.setItem("token", token);
       }
 
-      switch(role){
+      switch (role) {
         case "employee":
           setUser({
             ...account,
@@ -143,7 +151,7 @@ export default function Page() {
             type: "employee",
           });
           router.push("/pages/staff/home");
-        break;
+          break;
 
         case "admin":
           setUser({
@@ -157,7 +165,7 @@ export default function Page() {
             isApproved: true,
           });
           router.push("/pages/admin/dashboard");
-        break;
+          break;
 
         case "super admin":
           setUser({
@@ -171,11 +179,11 @@ export default function Page() {
             isApproved: true,
           });
           router.push("/pages/admin/dashboard");
-        break;
+          break;
       }
     },
-   onError: (err: { response?: { data?: string } }) => {
-    console.log(err)
+    onError: (err: { response?: { data?: string } }) => {
+      console.log(err);
       const message =
         typeof err.response?.data === "string"
           ? err.response.data
@@ -184,8 +192,6 @@ export default function Page() {
       incrementFails();
     },
   });
-
-   
 
   // ── Submit handler ──
   const handleSubmit = (e: React.FormEvent) => {
@@ -198,18 +204,13 @@ export default function Page() {
       return;
     }
 
-
-
-
     loginMutation.mutate({ email, password });
   };
 
   // ── Format countdown ──
   const minutes = Math.floor(lockoutRemaining / 60);
   const seconds = lockoutRemaining % 60;
-  const countdownText = minutes > 0
-    ? `${minutes}m ${seconds}s`
-    : `${seconds}s`;
+  const countdownText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -236,18 +237,36 @@ export default function Page() {
                 disabled={lockoutRemaining > 0}
               />
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={lockoutRemaining > 0}
-              />
+
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={passwordInputType}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={lockoutRemaining > 0}
+                  className="pr-10"
+                />
+
+                <button
+                  type="button"
+                  onClick={togglePasswordVisibility}
+                  disabled={lockoutRemaining > 0}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* ── Lockout Banner ── */}

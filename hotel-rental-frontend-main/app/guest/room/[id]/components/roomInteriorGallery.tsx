@@ -21,12 +21,16 @@ export function RoomInteriorGallery({
 
   const goPrev = useCallback(() => {
     if (lightboxIndex === null) return;
-    setLightboxIndex(lightboxIndex === 0 ? images.length - 1 : lightboxIndex - 1);
+    setLightboxIndex(
+      lightboxIndex === 0 ? images.length - 1 : lightboxIndex - 1,
+    );
   }, [lightboxIndex, images.length]);
 
   const goNext = useCallback(() => {
     if (lightboxIndex === null) return;
-    setLightboxIndex(lightboxIndex === images.length - 1 ? 0 : lightboxIndex + 1);
+    setLightboxIndex(
+      lightboxIndex === images.length - 1 ? 0 : lightboxIndex + 1,
+    );
   }, [lightboxIndex, images.length]);
 
   // Keyboard navigation for lightbox

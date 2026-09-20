@@ -9,10 +9,11 @@ import { errorAlert, successAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { validatePassword, validateEmail } from "@/app/utils/validation";
 import { checkEmailAvailability } from "@/app/utils/customFunction";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
+import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 export default function Page() {
   const router = useRouter();
@@ -20,6 +21,8 @@ export default function Page() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const { showPassword, togglePasswordVisibility, passwordInputType } =
+    usePasswordVisibility();
 
   const registerMutation = useMutation({
     mutationFn: (data: {
@@ -69,7 +72,9 @@ export default function Page() {
 
     const availability = await checkEmailAvailability(email);
     if (!availability.available) {
-      errorAlert("Email already exists. Registration is blocked — please use a different email address.");
+      errorAlert(
+        "Email already exists. Registration is blocked — please use a different email address.",
+      );
       return;
     }
 
@@ -122,28 +127,64 @@ export default function Page() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={passwordInputType}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="pr-10"
+                />
+
+                <button
+                  type="button"
+                  onClick={togglePasswordVisibility}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {password && <PasswordRequirements password={password} />}
 
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="••••••••"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
+
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={passwordInputType}
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  className="pr-10"
+                />
+
+                <button
+                  type="button"
+                  onClick={togglePasswordVisibility}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <Button

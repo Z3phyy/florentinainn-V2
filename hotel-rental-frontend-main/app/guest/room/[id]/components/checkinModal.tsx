@@ -100,13 +100,18 @@ export function CheckinModal({ selectedRoom }: { selectedRoom: roomInterface }) 
       room: string;
     }) => axiosInstance.post("/booking/reservation", data),
     onSuccess: (response) => {
+      console.log('Payment', paymentMode)
+      console.log("Response:",response)
+      console.log('Booking ID', response.data.bookingId)
       if (paymentMode == "stripe") {
         stripeBooking(systemInfo?.paymentMin.toString() || "1000", response.data.bookingId);
       } else {
         paymongoBooking(systemInfo?.paymentMin.toString() || "1000", response.data.bookingId);
+        console.log('System Info', systemInfo?.paymentMin.toString())
       }
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
+      console.log(err.response?.data)
       const message =
         err.response?.data?.message || "Failed to check in guest.";
       errorAlert(message);

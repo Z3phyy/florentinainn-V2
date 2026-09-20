@@ -285,6 +285,9 @@ export function AvailabilityCalendar() {
             <CalendarIcon className="size-3" />
             Occupancy Overview
           </h1>
+
+          <h1 className="text-2xl mt-2 font-semibold">Calendar</h1>
+          
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-2">
             Daily room status per arrival. Markers show reservations (RSV), checked-in guests (IN) and departed stays (OUT) with their arrival time.
           </p>

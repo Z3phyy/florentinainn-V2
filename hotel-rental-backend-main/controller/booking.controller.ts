@@ -8,7 +8,7 @@ import { SystemService } from "../services/system.service";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { verifyOnlinePayment } from "../utils/verifyPayment";
-import { sendReservationVoucherEmail } from "../utils/sendEmail";
+// import { sendReservationVoucherEmail } from "../utils/sendEmail";
 import { localDateStr } from "../utils/date";
 
 
@@ -94,6 +94,7 @@ export class BookingController {
   static createBooking = async (request: AuthRequest, response: Response) => {
     try {
       const { clientName, clientAddress, clientEmail, clientPhone, type, status, arrivalDate, arrivalTime, room } = request.body;
+      console.log(request.body)
 
       // Validate arrival date & time
       const validationError = validateArrivalDateTime(arrivalDate, arrivalTime);
@@ -615,18 +616,18 @@ export class BookingController {
             : undefined;
 
         try {
-          await sendReservationVoucherEmail({
-            to: booking.clientEmail,
-            guestName: booking.clientName,
-            bookingId: String(bookingId),
-            voucherUrl,
-            amount: paidAmount,
-            roomCategory,
-            arrivalDate: booking.arrivalDate,
-            arrivalTime: booking.arrivalTime,
-            departureDate: booking.departureDate,
-            refNumber: generatedRef,
-          });
+          // await sendReservationVoucherEmail({
+          //   to: booking.clientEmail,
+          //   guestName: booking.clientName,
+          //   bookingId: String(bookingId),
+          //   voucherUrl,
+          //   amount: paidAmount,
+          //   roomCategory,
+          //   arrivalDate: booking.arrivalDate,
+          //   arrivalTime: booking.arrivalTime,
+          //   departureDate: booking.departureDate,
+          //   refNumber: generatedRef,
+          // });
         } catch (emailError) {
           console.log("Voucher email failed: " + (emailError as Error).message);
         }
