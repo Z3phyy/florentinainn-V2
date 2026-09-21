@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -114,37 +114,44 @@ const hotelAmenities = [
   {
     icon: Wind,
     title: "Airconditioned Rooms",
-    description: "Fully air-conditioned suites ensuring cool, comfortable, and refreshing stays all day and night.",
+    description:
+      "Fully air-conditioned suites ensuring cool, comfortable, and refreshing stays all day and night.",
   },
   {
     icon: Droplets,
     title: "Hot & Cold Shower",
-    description: "Enjoy relaxing showers with adjustable hot and cold water temperature in your private bathroom.",
+    description:
+      "Enjoy relaxing showers with adjustable hot and cold water temperature in your private bathroom.",
   },
   {
     icon: Tv,
     title: "Cable TV / DVD",
-    description: "Complete in-room entertainment with high-definition cable TV channels and DVD movie access.",
+    description:
+      "Complete in-room entertainment with high-definition cable TV channels and DVD movie access.",
   },
   {
     icon: Wifi,
     title: "Free WiFi Internet",
-    description: "Fast and reliable complimentary wireless internet access available in all rooms and guest lounges.",
+    description:
+      "Fast and reliable complimentary wireless internet access available in all rooms and guest lounges.",
   },
   {
     icon: Utensils,
     title: "We Serve Breakfast",
-    description: "Start your day with delicious, freshly prepared breakfast options served with warm hospitality.",
+    description:
+      "Start your day with delicious, freshly prepared breakfast options served with warm hospitality.",
   },
   {
     icon: Car,
     title: "Private Parking",
-    description: "Dedicated and secure on-site private parking area for all staying guests and family vehicles.",
+    description:
+      "Dedicated and secure on-site private parking area for all staying guests and family vehicles.",
   },
   {
     icon: Zap,
     title: "Backup Generator",
-    description: "Guaranteed uninterrupted 24/7 power supply with our dedicated on-site backup generator system.",
+    description:
+      "Guaranteed uninterrupted 24/7 power supply with our dedicated on-site backup generator system.",
   },
 ];
 
@@ -165,7 +172,11 @@ export default function Home() {
   });
 
   // ── Rooms fetch ──
-  const { data: rooms, isLoading: roomsLoading, isError: roomsError } = useQuery({
+  const {
+    data: rooms,
+    isLoading: roomsLoading,
+    isError: roomsError,
+  } = useQuery({
     queryKey: ["rooms"],
     queryFn: async (): Promise<roomInterface[]> => {
       const response = await axiosInstance.get("/room");
@@ -214,14 +225,18 @@ export default function Home() {
         message: contactMessage.trim(),
       });
 
-      toast.success("Thank you! Your message has been sent to our reception team and an email confirmation was sent to your inbox.");
+      toast.success(
+        "Thank you! Your message has been sent to our reception team and an email confirmation was sent to your inbox.",
+      );
       setContactName("");
       setContactEmail("");
       setContactSubject("");
       setContactMessage("");
     } catch (error) {
       console.error("Failed to deliver inquiry message:", error);
-      toast.error("Unable to deliver message right now. Please try again or reach us by phone.");
+      toast.error(
+        "Unable to deliver message right now. Please try again or reach us by phone.",
+      );
     } finally {
       setSendingContact(false);
     }
@@ -283,24 +298,38 @@ export default function Home() {
     if (!rooms) return [];
     let list = rooms.filter((room) => {
       // Category filter
-      if (categoryFilter !== "all" && room.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+      if (
+        categoryFilter !== "all" &&
+        room.category.toLowerCase() !== categoryFilter.toLowerCase()
+      )
+        return false;
       // Search query (category, roomNumber, description, amenities)
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const categoryMatch = room.category.toLowerCase().includes(query);
-        const numberMatch = room.roomNumber ? room.roomNumber.toString().toLowerCase().includes(query) : false;
-        const descMatch = room.description ? room.description.toLowerCase().includes(query) : false;
-        const amenityMatch = room.amenities ? room.amenities.some((a) => a.toLowerCase().includes(query)) : false;
-        if (!categoryMatch && !numberMatch && !descMatch && !amenityMatch) return false;
+        const numberMatch = room.roomNumber
+          ? room.roomNumber.toString().toLowerCase().includes(query)
+          : false;
+        const descMatch = room.description
+          ? room.description.toLowerCase().includes(query)
+          : false;
+        const amenityMatch = room.amenities
+          ? room.amenities.some((a) => a.toLowerCase().includes(query))
+          : false;
+        if (!categoryMatch && !numberMatch && !descMatch && !amenityMatch)
+          return false;
       }
       // Min and max price
-      const effectivePrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
+      const effectivePrice = Math.round(
+        room.price * (1 - (room.discount || 0) / 100),
+      );
       if (minPrice && effectivePrice < Number(minPrice)) return false;
       if (maxPrice && effectivePrice > Number(maxPrice)) return false;
       // Discounted only
       if (discountedOnly && (room.discount || 0) <= 0) return false;
       // Guest capacity
-      if (guestFilter !== "all" && (room.maxHead || 2) < Number(guestFilter)) return false;
+      if (guestFilter !== "all" && (room.maxHead || 2) < Number(guestFilter))
+        return false;
       return true;
     });
 
@@ -322,7 +351,16 @@ export default function Home() {
     }
 
     return list;
-  }, [rooms, categoryFilter, searchQuery, minPrice, maxPrice, discountedOnly, guestFilter, sortBy]);
+  }, [
+    rooms,
+    categoryFilter,
+    searchQuery,
+    minPrice,
+    maxPrice,
+    discountedOnly,
+    guestFilter,
+    sortBy,
+  ]);
 
   const hasActiveFilters =
     categoryFilter !== "all" ||
@@ -364,15 +402,19 @@ export default function Home() {
   const statusBadge = (status: string) => {
     switch (status) {
       case "available":
-        return "bg-emerald-500/10 text-emerald-700 border-emerald-300 dark:border-emerald-700";
+        return "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700";
+
       case "occupied":
-        return "bg-amber-500/10 text-amber-700 border-amber-300 dark:border-amber-700";
+        return "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700";
+
       case "reserved":
-        return "bg-violet-500/10 text-violet-700 border-violet-300 dark:border-violet-700";
+        return "bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-700";
+
       case "maintenance":
-        return "bg-rose-500/10 text-rose-700 border-rose-300 dark:border-rose-700";
+        return "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700";
+
       default:
-        return "bg-muted text-muted-foreground border-border";
+        return "bg-muted text-foreground border-border";
     }
   };
 
@@ -380,7 +422,9 @@ export default function Home() {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center gap-4 bg-[#FAF5F5]">
         <Loader2 className="size-10 animate-spin text-[#900546]" />
-        <p className="text-sm font-medium text-[#130005]">Loading luxury experience...</p>
+        <p className="text-sm font-medium text-[#130005]">
+          Loading luxury experience...
+        </p>
       </div>
     );
   }
@@ -389,7 +433,9 @@ export default function Home() {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center gap-3 px-6 text-center bg-[#FAF5F5]">
         <Building2 className="size-12 text-[#900546]/40" />
-        <h2 className="text-xl font-serif font-bold text-[#130005]">Welcome to Our Hotel</h2>
+        <h2 className="text-xl font-serif font-bold text-[#130005]">
+          Welcome to Our Hotel
+        </h2>
         <p className="text-sm text-[#5C454B] max-w-xs">
           Could not connect to the booking service. Please refresh or try again.
         </p>
@@ -446,7 +492,8 @@ export default function Home() {
                 alt={hotelName}
                 className="size-full object-contain"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                  (e.target as HTMLImageElement).src =
+                    "/Florentina Inn Logo.png";
                 }}
               />
             </div>
@@ -532,7 +579,6 @@ export default function Home() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-8 relative z-10">
           <div className="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center">
-            
             {/* Left Headline & Story */}
             <div className="lg:col-span-7 space-y-6">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#F968AC]/40 bg-[#900546]/40 backdrop-blur-md px-4 py-1.5 text-xs font-semibold text-[#F968AC]">
@@ -541,7 +587,8 @@ export default function Home() {
               </div>
 
               <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-normal tracking-tight text-white leading-[1.14] drop-shadow-md">
-                {systemInfo?.header || "Comfortable and Affordable Rooms for Every Stay"}
+                {systemInfo?.header ||
+                  "Comfortable and Affordable Rooms for Every Stay"}
               </h1>
 
               <p className="text-base sm:text-lg text-gray-200 leading-relaxed max-w-xl font-normal drop-shadow-sm">
@@ -571,15 +618,21 @@ export default function Home() {
               {/* Quick trust metrics */}
               <div className="grid grid-cols-3 gap-4 pt-6 border-t border-white/20 max-w-lg">
                 <div>
-                  <span className="font-serif text-2xl font-bold text-white block">100%</span>
+                  <span className="font-serif text-2xl font-bold text-white block">
+                    100%
+                  </span>
                   <span className="text-xs text-gray-300">Verified Stays</span>
                 </div>
                 <div>
-                  <span className="font-serif text-2xl font-bold text-[#F968AC] block">4.9 ★</span>
+                  <span className="font-serif text-2xl font-bold text-[#F968AC] block">
+                    4.9 ★
+                  </span>
                   <span className="text-xs text-gray-300">Guest Rating</span>
                 </div>
                 <div>
-                  <span className="font-serif text-2xl font-bold text-white block">24/7</span>
+                  <span className="font-serif text-2xl font-bold text-white block">
+                    24/7
+                  </span>
                   <span className="text-xs text-gray-300">Live Front Desk</span>
                 </div>
               </div>
@@ -593,7 +646,9 @@ export default function Home() {
                     <h3 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
                       Check Availability
                     </h3>
-                    <p className="text-xs text-[#5C454B] dark:text-gray-300 mt-0.5">Find & reserve your preferred suite</p>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-300 mt-0.5">
+                      Find & reserve your preferred suite
+                    </p>
                   </div>
                   <div className="size-10 rounded-2xl bg-[#900546]/10 text-[#900546] dark:text-[#F968AC] flex items-center justify-center">
                     <Calendar className="size-5" />
@@ -621,7 +676,10 @@ export default function Home() {
                     <Label className="text-xs font-semibold uppercase tracking-wider text-[#5C454B] dark:text-gray-300">
                       Room Category / Suite
                     </Label>
-                    <Select value={heroCategory} onValueChange={setHeroCategory}>
+                    <Select
+                      value={heroCategory}
+                      onValueChange={setHeroCategory}
+                    >
                       <SelectTrigger className="h-11 bg-[#FAF5F5] dark:bg-[#251E20] border-[#D9C3C3] dark:border-white/10 rounded-xl text-xs">
                         <SelectValue placeholder="All Categories" />
                       </SelectTrigger>
@@ -665,7 +723,6 @@ export default function Home() {
                 </form>
               </div>
             </div>
-
           </div>
         </div>
       </section>
@@ -715,10 +772,12 @@ export default function Home() {
       {/* ─────────────────────────────────────────────── */}
       {/* 5. ABOUT / SERENITY STORY SECTION               */}
       {/* ─────────────────────────────────────────────── */}
-      <section id="about-section" className="py-16 lg:py-24 bg-[#E4D1D1]/30 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10">
+      <section
+        id="about-section"
+        className="py-16 lg:py-24 bg-[#E4D1D1]/30 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-8">
           <div className="grid lg:grid-cols-12 gap-12 items-center">
-            
             {/* Editorial Story */}
             <div className="lg:col-span-6 space-y-6">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3.5 py-1 text-xs font-semibold text-[#900546] dark:text-[#F968AC]">
@@ -728,25 +787,38 @@ export default function Home() {
                 A Sanctuary of Serenity, Comfort & Warm Hospitality
               </h2>
               <p className="text-sm sm:text-base text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                Welcome to {hotelName}, where tranquility meets modern boutique comfort. Designed to offer a peaceful haven away from the busy daily grind, our hotel combines refined architecture, lush landscapes, and personalized service.
+                Welcome to {hotelName}, where tranquility meets modern boutique
+                comfort. Designed to offer a peaceful haven away from the busy
+                daily grind, our hotel combines refined architecture, lush
+                landscapes, and personalized service.
               </p>
               <p className="text-sm sm:text-base text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                Whether you are visiting for a weekend escape, a special celebration, or a relaxing staycation, our dedicated staff ensures every detail of your stay is effortless and memorable.
+                Whether you are visiting for a weekend escape, a special
+                celebration, or a relaxing staycation, our dedicated staff
+                ensures every detail of your stay is effortless and memorable.
               </p>
 
               <div className="grid grid-cols-2 gap-4 pt-4">
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="size-5 text-[#618685] shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm font-bold text-[#130005] dark:text-white">Seamless Check-in</h4>
-                    <p className="text-xs text-[#5C454B] dark:text-gray-400">Instant room key handover</p>
+                    <h4 className="text-sm font-bold text-[#130005] dark:text-white">
+                      Seamless Check-in
+                    </h4>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400">
+                      Instant room key handover
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="size-5 text-[#618685] shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm font-bold text-[#130005] dark:text-white">Flexible Payments</h4>
-                    <p className="text-xs text-[#5C454B] dark:text-gray-400">Cash, GCash & Online</p>
+                    <h4 className="text-sm font-bold text-[#130005] dark:text-white">
+                      Flexible Payments
+                    </h4>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400">
+                      Cash, GCash & Online
+                    </p>
                   </div>
                 </div>
               </div>
@@ -767,14 +839,20 @@ export default function Home() {
               <div className="space-y-4">
                 <div className="rounded-3xl overflow-hidden shadow-lg border border-[#D9C3C3] dark:border-white/10 h-48 sm:h-64 bg-muted">
                   <img
-                    src={systemInfo?.aboutImg1 || "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"}
+                    src={
+                      systemInfo?.aboutImg1 ||
+                      "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+                    }
                     alt="Luxury Suite Interior"
                     className="size-full object-cover hover:scale-105 transition-transform duration-700"
                   />
                 </div>
                 <div className="rounded-3xl overflow-hidden shadow-lg border border-[#D9C3C3] dark:border-white/10 h-36 sm:h-48 bg-muted">
                   <img
-                    src={systemInfo?.aboutImg2 || "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80"}
+                    src={
+                      systemInfo?.aboutImg2 ||
+                      "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=800&q=80"
+                    }
                     alt="Relaxing Lounge"
                     className="size-full object-cover hover:scale-105 transition-transform duration-700"
                   />
@@ -783,21 +861,26 @@ export default function Home() {
               <div className="space-y-4 pt-6">
                 <div className="rounded-3xl overflow-hidden shadow-lg border border-[#D9C3C3] dark:border-white/10 h-40 sm:h-52 bg-muted">
                   <img
-                    src={systemInfo?.aboutImg3 || "https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80"}
+                    src={
+                      systemInfo?.aboutImg3 ||
+                      "https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80"
+                    }
                     alt="Swimming Pool"
                     className="size-full object-cover hover:scale-105 transition-transform duration-700"
                   />
                 </div>
                 <div className="rounded-3xl overflow-hidden shadow-lg border border-[#D9C3C3] dark:border-white/10 h-48 sm:h-60 bg-muted">
                   <img
-                    src={systemInfo?.aboutImg4 || "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80"}
+                    src={
+                      systemInfo?.aboutImg4 ||
+                      "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80"
+                    }
                     alt="Boutique Ambiance"
                     className="size-full object-cover hover:scale-105 transition-transform duration-700"
                   />
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </section>
@@ -810,7 +893,6 @@ export default function Home() {
         className="py-16 lg:py-24 bg-white dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10"
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-8 space-y-8">
-          
           {/* ── Section Title & Subtitle ── */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-[#D9C3C3] dark:border-white/10">
             <div>
@@ -822,7 +904,8 @@ export default function Home() {
                 Explore Our Rooms & Suites
               </h2>
               <p className="text-sm text-[#5C454B] dark:text-gray-300 mt-2 max-w-xl">
-                Select from our collection of suites designed for serenity, comfort, and peaceful luxury.
+                Select from our collection of suites designed for serenity,
+                comfort, and peaceful luxury.
               </p>
             </div>
 
@@ -830,7 +913,10 @@ export default function Home() {
             <div className="flex items-center gap-2 text-xs font-medium text-[#5C454B] dark:text-gray-300">
               <span className="inline-flex items-center gap-1.5 bg-[#FAF5F5] dark:bg-[#221017] px-3.5 py-1.5 rounded-full border border-[#D9C3C3] dark:border-white/10">
                 <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <strong className="text-[#130005] dark:text-white">{availableCount}</strong> Available
+                <strong className="text-[#130005] dark:text-white">
+                  {availableCount}
+                </strong>{" "}
+                Available
               </span>
               {discountedCount > 0 && (
                 <span className="inline-flex items-center gap-1.5 bg-[#900546]/10 text-[#900546] dark:text-[#F968AC] px-3.5 py-1.5 rounded-full border border-[#900546]/20 font-semibold">
@@ -865,7 +951,8 @@ export default function Home() {
               </button>
 
               {categories.map((cat) => {
-                const isActive = categoryFilter.toLowerCase() === cat.toLowerCase();
+                const isActive =
+                  categoryFilter.toLowerCase() === cat.toLowerCase();
                 const count = categoryCounts[cat] || 0;
                 return (
                   <button
@@ -895,10 +982,8 @@ export default function Home() {
 
           {/* ── 2. Modern Filter & Search Toolbar ── */}
           <div className="bg-[#E4D1D1]/30 dark:bg-[#1E0E14] rounded-3xl p-4 sm:p-5 border border-[#D9C3C3] dark:border-white/10 shadow-xs space-y-4">
-            
             {/* Top Toolbar Row */}
             <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3">
-              
               {/* Search Bar */}
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-[#618685]" />
@@ -929,9 +1014,15 @@ export default function Home() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="featured">Featured Suites</SelectItem>
-                    <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                    <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                    <SelectItem value="discount-desc">Highest Discount</SelectItem>
+                    <SelectItem value="price-asc">
+                      Price: Low to High
+                    </SelectItem>
+                    <SelectItem value="price-desc">
+                      Price: High to Low
+                    </SelectItem>
+                    <SelectItem value="discount-desc">
+                      Highest Discount
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -940,24 +1031,29 @@ export default function Home() {
               <button
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                 className={`inline-flex items-center justify-center gap-2 h-12 px-5 rounded-2xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
-                  showAdvancedFilters || (minPrice || maxPrice || guestFilter !== "all" || discountedOnly)
+                  showAdvancedFilters ||
+                  minPrice ||
+                  maxPrice ||
+                  guestFilter !== "all" ||
+                  discountedOnly
                     ? "bg-[#900546] text-white shadow-md shadow-[#900546]/20"
                     : "bg-white dark:bg-[#130005] text-[#130005] dark:text-white border border-[#D9C3C3] dark:border-white/10 hover:border-[#900546]"
                 }`}
               >
                 <SlidersHorizontal className="size-3.5" />
                 <span>More Filters</span>
-                {(minPrice || maxPrice || guestFilter !== "all" || discountedOnly) && (
+                {(minPrice ||
+                  maxPrice ||
+                  guestFilter !== "all" ||
+                  discountedOnly) && (
                   <span className="size-2 rounded-full bg-[#F968AC] animate-pulse" />
                 )}
               </button>
-
             </div>
 
             {/* ── Expandable Advanced Filters Panel ── */}
             {showAdvancedFilters && (
               <div className="pt-4 border-t border-[#D9C3C3] dark:border-white/10 grid grid-cols-1 md:grid-cols-3 gap-5 animate-in fade-in slide-in-from-top-2 duration-300">
-                
                 {/* Price Filter & Presets */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -970,7 +1066,7 @@ export default function Home() {
                       </span>
                     )}
                   </div>
-                  
+
                   {/* Presets */}
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
@@ -1052,7 +1148,10 @@ export default function Home() {
                         checked={discountedOnly}
                         onCheckedChange={setDiscountedOnly}
                       />
-                      <Label htmlFor="discounted-filter-mellow" className="text-xs font-semibold cursor-pointer text-[#130005] dark:text-white flex items-center gap-1.5">
+                      <Label
+                        htmlFor="discounted-filter-mellow"
+                        className="text-xs font-semibold cursor-pointer text-[#130005] dark:text-white flex items-center gap-1.5"
+                      >
                         <Tag className="size-3 text-[#F968AC]" />
                         Discounted Deals Only
                       </Label>
@@ -1069,10 +1168,8 @@ export default function Home() {
                     </button>
                   )}
                 </div>
-
               </div>
             )}
-
           </div>
 
           {/* ── 3. Active Filter Tags & Results Counter ── */}
@@ -1082,7 +1179,9 @@ export default function Home() {
                 Showing {filteredRooms.length} of {rooms?.length || 0} suites
               </span>
               {filteredRooms.length === 0 && (
-                <span className="text-rose-600 font-medium">· No matching rooms found</span>
+                <span className="text-rose-600 font-medium">
+                  · No matching rooms found
+                </span>
               )}
             </div>
 
@@ -1092,7 +1191,10 @@ export default function Home() {
                 {categoryFilter !== "all" && (
                   <span className="inline-flex items-center gap-1 bg-[#900546]/10 text-[#900546] border border-[#900546]/30 px-3 py-1 rounded-full text-xs font-semibold">
                     Category: {categoryFilter}
-                    <button onClick={() => setCategoryFilter("all")} className="hover:text-black ml-1 cursor-pointer">
+                    <button
+                      onClick={() => setCategoryFilter("all")}
+                      className="hover:text-black ml-1 cursor-pointer"
+                    >
                       <X className="size-3" />
                     </button>
                   </span>
@@ -1100,7 +1202,10 @@ export default function Home() {
                 {searchQuery && (
                   <span className="inline-flex items-center gap-1 bg-[#900546]/10 text-[#900546] border border-[#900546]/30 px-3 py-1 rounded-full text-xs font-semibold">
                     &ldquo;{searchQuery}&rdquo;
-                    <button onClick={() => setSearchQuery("")} className="hover:text-black ml-1 cursor-pointer">
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="hover:text-black ml-1 cursor-pointer"
+                    >
                       <X className="size-3" />
                     </button>
                   </span>
@@ -1108,7 +1213,10 @@ export default function Home() {
                 {guestFilter !== "all" && (
                   <span className="inline-flex items-center gap-1 bg-[#900546]/10 text-[#900546] border border-[#900546]/30 px-3 py-1 rounded-full text-xs font-semibold">
                     {guestFilter}+ Guests
-                    <button onClick={() => setGuestFilter("all")} className="hover:text-black ml-1 cursor-pointer">
+                    <button
+                      onClick={() => setGuestFilter("all")}
+                      className="hover:text-black ml-1 cursor-pointer"
+                    >
                       <X className="size-3" />
                     </button>
                   </span>
@@ -1131,7 +1239,10 @@ export default function Home() {
                 {discountedOnly && (
                   <span className="inline-flex items-center gap-1 bg-[#900546]/10 text-[#900546] border border-[#900546]/30 px-3 py-1 rounded-full text-xs font-semibold">
                     Special Deals
-                    <button onClick={() => setDiscountedOnly(false)} className="hover:text-black ml-1 cursor-pointer">
+                    <button
+                      onClick={() => setDiscountedOnly(false)}
+                      className="hover:text-black ml-1 cursor-pointer"
+                    >
                       <X className="size-3" />
                     </button>
                   </span>
@@ -1150,7 +1261,10 @@ export default function Home() {
           {roomsLoading ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-3xl border border-[#D9C3C3] overflow-hidden bg-card">
+                <div
+                  key={i}
+                  className="rounded-3xl border border-[#D9C3C3] overflow-hidden bg-card"
+                >
                   <Skeleton className="h-64 w-full" />
                   <div className="p-6 space-y-3">
                     <Skeleton className="h-6 w-3/4" />
@@ -1162,12 +1276,16 @@ export default function Home() {
             </div>
           ) : roomsError ? (
             <div className="text-center py-16 bg-[#FAF5F5] rounded-3xl border border-[#D9C3C3]">
-              <p className="text-destructive font-semibold">Failed to load accommodations.</p>
+              <p className="text-destructive font-semibold">
+                Failed to load accommodations.
+              </p>
             </div>
           ) : filteredRooms.length > 0 ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
               {filteredRooms.map((room) => {
-                const finalPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
+                const finalPrice = Math.round(
+                  room.price * (1 - (room.discount || 0) / 100),
+                );
                 return (
                   <div
                     key={room._id}
@@ -1195,10 +1313,15 @@ export default function Home() {
                             <span className="bg-[#130005]/85 backdrop-blur-md text-white text-[11px] font-bold px-3 py-1 rounded-full border border-white/20">
                               Unit {room.roomNumber}
                             </span>
-                          ) : <span />}
+                          ) : (
+                            <span />
+                          )}
 
-                          <span className={`text-[11px] font-bold px-3 py-1 rounded-full border backdrop-blur-md ${statusBadge(room.status)}`}>
-                            {room.status.charAt(0).toUpperCase() + room.status.slice(1)}
+                          <span
+                            className={`text-[11px] font-bold px-3 py-1 rounded-full border backdrop-blur-md ${statusBadge(room.status)}`}
+                          >
+                            {room.status.charAt(0).toUpperCase() +
+                              room.status.slice(1)}
                           </span>
                         </div>
 
@@ -1232,7 +1355,9 @@ export default function Home() {
                                 ₱{room.price.toLocaleString()}
                               </div>
                             )}
-                            <span className="text-[10px] text-[#5C454B] dark:text-gray-400 block">per night</span>
+                            <span className="text-[10px] text-[#5C454B] dark:text-gray-400 block">
+                              per night
+                            </span>
                           </div>
                         </div>
 
@@ -1286,7 +1411,9 @@ export default function Home() {
                 No Suites Match Your Filters
               </h3>
               <p className="text-xs text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                We couldn&apos;t find any suites matching your specific search criteria. Try clearing some filters or searching for another room category.
+                We couldn&apos;t find any suites matching your specific search
+                criteria. Try clearing some filters or searching for another
+                room category.
               </p>
               <Button
                 onClick={clearFilters}
@@ -1297,16 +1424,17 @@ export default function Home() {
               </Button>
             </div>
           )}
-
         </div>
       </section>
 
       {/* ─────────────────────────────────────────────── */}
       {/* 7. HOTEL SERVICES & AMENITIES GRID              */}
       {/* ─────────────────────────────────────────────── */}
-      <section id="amenities-section" className="py-16 lg:py-24 bg-[#E4D1D1]/20 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10">
+      <section
+        id="amenities-section"
+        className="py-16 lg:py-24 bg-[#E4D1D1]/20 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-8">
-          
           <div className="text-center max-w-2xl mx-auto mb-16">
             <div className="inline-flex items-center gap-2 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3.5 py-1 text-xs font-semibold text-[#900546] dark:text-[#F968AC] mb-3">
               World-Class Facilities
@@ -1315,7 +1443,8 @@ export default function Home() {
               Curated Amenities & Services
             </h2>
             <p className="text-sm text-[#5C454B] dark:text-gray-300 mt-2">
-              Every detail of your stay is designed with relaxation and indulgence in mind.
+              Every detail of your stay is designed with relaxation and
+              indulgence in mind.
             </p>
           </div>
 
@@ -1340,16 +1469,17 @@ export default function Home() {
               );
             })}
           </div>
-
         </div>
       </section>
 
       {/* ─────────────────────────────────────────────── */}
       {/* 8. TESTIMONIALS & GUEST REVIEWS                */}
       {/* ─────────────────────────────────────────────── */}
-      <section id="reviews-section" className="py-16 lg:py-24 bg-white dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10">
+      <section
+        id="reviews-section"
+        className="py-16 lg:py-24 bg-white dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-8">
-          
           <div className="text-center max-w-2xl mx-auto mb-16">
             <div className="inline-flex items-center gap-2 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3.5 py-1 text-xs font-semibold text-[#900546] dark:text-[#F968AC] mb-3">
               Guest Experiences
@@ -1358,7 +1488,8 @@ export default function Home() {
               What Our Guests Say
             </h2>
             <p className="text-sm text-[#5C454B] dark:text-gray-300 mt-2">
-              Read authentic feedback from travelers who made {hotelName} their home.
+              Read authentic feedback from travelers who made {hotelName} their
+              home.
             </p>
           </div>
 
@@ -1371,7 +1502,10 @@ export default function Home() {
                 <div>
                   <div className="flex items-center gap-1 mb-4">
                     {Array.from({ length: t.rating }).map((_, i) => (
-                      <Star key={i} className="size-4 fill-[#F968AC] text-[#F968AC]" />
+                      <Star
+                        key={i}
+                        className="size-4 fill-[#F968AC] text-[#F968AC]"
+                      />
                     ))}
                   </div>
                   <p className="text-xs sm:text-sm text-[#130005] dark:text-gray-300 italic leading-relaxed mb-6">
@@ -1384,25 +1518,29 @@ export default function Home() {
                     {t.avatar}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-[#130005] dark:text-white">{t.name}</h4>
-                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400">{t.role}</p>
+                    <h4 className="text-xs font-bold text-[#130005] dark:text-white">
+                      {t.name}
+                    </h4>
+                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
+                      {t.role}
+                    </p>
                   </div>
                 </div>
               </div>
             ))}
           </div>
-
         </div>
       </section>
 
       {/* ─────────────────────────────────────────────── */}
       {/* 9. LOCATION, CONTACT & INQUIRY FORM             */}
       {/* ─────────────────────────────────────────────── */}
-      <section id="contact-section" className="py-16 lg:py-24 bg-[#E4D1D1]/30 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10">
+      <section
+        id="contact-section"
+        className="py-16 lg:py-24 bg-[#E4D1D1]/30 dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10"
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-8">
-          
           <div className="grid lg:grid-cols-12 gap-12">
-            
             {/* Left: Contact Info & Policies */}
             <div className="lg:col-span-5 space-y-6">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3.5 py-1 text-xs font-semibold text-[#900546] dark:text-[#F968AC]">
@@ -1412,7 +1550,8 @@ export default function Home() {
                 Contact Front Desk & Concierge
               </h2>
               <p className="text-sm text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                Have questions about room availability, group bookings, or special events? Our team is available 24/7 to assist.
+                Have questions about room availability, group bookings, or
+                special events? Our team is available 24/7 to assist.
               </p>
 
               <div className="space-y-4 pt-2">
@@ -1421,7 +1560,9 @@ export default function Home() {
                     <MapPin className="size-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">Location</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">
+                      Location
+                    </h4>
                     <p className="text-sm font-medium text-[#130005] dark:text-white mt-0.5">
                       Jose D. Aspiras Hwy, Tubao, 2506 La Union, Philippines
                     </p>
@@ -1433,7 +1574,9 @@ export default function Home() {
                     <Clock className="size-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">Check-in & Check-out</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">
+                      Check-in & Check-out
+                    </h4>
                     <p className="text-sm font-medium text-[#130005] dark:text-white mt-0.5">
                       Flexible Anytime Check-in & Check-out (24/7 Front Desk)
                     </p>
@@ -1445,7 +1588,9 @@ export default function Home() {
                     <CreditCard className="size-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">Payment Methods</h4>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">
+                      Payment Methods
+                    </h4>
                     <p className="text-sm font-medium text-[#130005] dark:text-white mt-0.5">
                       Cash · GCash · Online Payment
                     </p>
@@ -1461,13 +1606,16 @@ export default function Home() {
                   Send A Direct Inquiry
                 </h3>
                 <p className="text-xs text-[#5C454B] dark:text-gray-400 mb-6">
-                  Fill in your details and our front-desk reception will get back to you promptly.
+                  Fill in your details and our front-desk reception will get
+                  back to you promptly.
                 </p>
 
                 <form onSubmit={handleContactSubmit} className="space-y-4">
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">Your Name *</Label>
+                      <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">
+                        Your Name *
+                      </Label>
                       <Input
                         value={contactName}
                         onChange={(e) => setContactName(e.target.value)}
@@ -1477,7 +1625,9 @@ export default function Home() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">Email Address *</Label>
+                      <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">
+                        Email Address *
+                      </Label>
                       <Input
                         type="email"
                         value={contactEmail}
@@ -1490,7 +1640,9 @@ export default function Home() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">Subject</Label>
+                    <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">
+                      Subject
+                    </Label>
                     <Input
                       value={contactSubject}
                       onChange={(e) => setContactSubject(e.target.value)}
@@ -1500,7 +1652,9 @@ export default function Home() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">Message *</Label>
+                    <Label className="text-xs font-semibold text-[#5C454B] dark:text-gray-300">
+                      Message *
+                    </Label>
                     <Textarea
                       value={contactMessage}
                       onChange={(e) => setContactMessage(e.target.value)}
@@ -1531,14 +1685,12 @@ export default function Home() {
                 </form>
               </div>
             </div>
-
           </div>
 
           {/* ── Interactive GPS Leaflet Map & Directions ── */}
           <div className="mt-12">
             <HotelLocationMap hotelName={hotelName} />
           </div>
-
         </div>
       </section>
 
@@ -1557,7 +1709,8 @@ export default function Home() {
                     alt={hotelName}
                     className="size-full object-contain"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                      (e.target as HTMLImageElement).src =
+                        "/Florentina Inn Logo.png";
                     }}
                   />
                 </div>
@@ -1571,7 +1724,8 @@ export default function Home() {
                 </div>
               </div>
               <p className="text-xs text-[#E4D1D1]/70 leading-relaxed max-w-xs">
-                Your premier destination for serenity, luxury comfort, and world-class hospitality in Tubao, La Union.
+                Your premier destination for serenity, luxury comfort, and
+                world-class hospitality in Tubao, La Union.
               </p>
             </div>
 
@@ -1582,27 +1736,42 @@ export default function Home() {
               </h4>
               <ul className="space-y-2 text-xs text-[#E4D1D1]/80">
                 <li>
-                  <button onClick={() => scrollToSection("hero-section")} className="hover:text-[#F968AC] transition-colors cursor-pointer">
+                  <button
+                    onClick={() => scrollToSection("hero-section")}
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
                     Home
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => scrollToSection("rooms-section")} className="hover:text-[#F968AC] transition-colors cursor-pointer">
+                  <button
+                    onClick={() => scrollToSection("rooms-section")}
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
                     Rooms & Suites
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => scrollToSection("amenities-section")} className="hover:text-[#F968AC] transition-colors cursor-pointer">
+                  <button
+                    onClick={() => scrollToSection("amenities-section")}
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
                     Hotel Amenities
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => scrollToSection("about-section")} className="hover:text-[#F968AC] transition-colors cursor-pointer">
+                  <button
+                    onClick={() => scrollToSection("about-section")}
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
                     About Us
                   </button>
                 </li>
                 <li>
-                  <button onClick={() => scrollToSection("contact-section")} className="hover:text-[#F968AC] transition-colors cursor-pointer">
+                  <button
+                    onClick={() => scrollToSection("contact-section")}
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
                     Contact & Inquiries
                   </button>
                 </li>
@@ -1623,16 +1792,22 @@ export default function Home() {
                 <span>24/7 Front-Desk & Concierge Service</span>
               </p>
               <p className="text-xs text-[#E4D1D1]/60 pt-1">
-                For urgent inquiries or booking assistance, our reception is open around the clock.
+                For urgent inquiries or booking assistance, our reception is
+                open around the clock.
               </p>
             </div>
           </div>
 
           {/* Bottom copyright */}
           <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#E4D1D1]/50">
-            <p>&copy; {new Date().getFullYear()} {hotelName}. All rights reserved.</p>
+            <p>
+              &copy; {new Date().getFullYear()} {hotelName}. All rights
+              reserved.
+            </p>
             <p className="flex items-center gap-2">
-              <span className="text-[#F968AC]">Crafted for Serenity & Luxury Hospitality</span>
+              <span className="text-[#F968AC]">
+                Crafted for Serenity & Luxury Hospitality
+              </span>
             </p>
           </div>
 
@@ -1655,4 +1830,3 @@ export default function Home() {
     </div>
   );
 }
-

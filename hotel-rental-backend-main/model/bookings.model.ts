@@ -19,6 +19,7 @@ const BookingsSchema = new Schema({
   arrivalTime: { type: String, required: true },
   arrivalNotified: { type: Boolean, default: false },
   overdueNotified: { type: Boolean, default: false },
+  graceNotified: { type: Boolean, default: false },
   room: {
     type: Schema.Types.ObjectId,
     ref: "Rooms",

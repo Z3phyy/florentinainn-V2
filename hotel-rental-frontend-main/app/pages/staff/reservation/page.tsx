@@ -263,7 +263,7 @@ function ReservationCard({
                 {room?.roomNumber ? `Room ${room.roomNumber} · ` : ""}{room?.category ?? "Room"}
               </p>
               <p className="text-xs font-semibold text-[#900546] dark:text-[#F968AC] mt-0.5">
-                ₱{(room?.price ?? 0).toLocaleString()}/night
+                ₱{(room?.price ?? 0).toLocaleString()}/day
               </p>
             </div>
           </div>

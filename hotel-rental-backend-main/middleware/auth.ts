@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthRequest } from "../types/request.type";
 import jwt from "jsonwebtoken";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
 import { AccountService } from "../services/acccount.service";
 import { AdminService } from "../services/admin.service";
 import { accountInterface } from "../types/accounts.type";
@@ -11,7 +11,11 @@ dotenv.config();
 
 const jwtSecrets = getJwtSecretCandidates();
 
-const buildStaffAccount = (accountDoc: any, fallbackName?: string, type = "employee"): any => ({
+const buildStaffAccount = (
+  accountDoc: any,
+  fallbackName?: string,
+  type = "employee",
+): any => ({
   _id: accountDoc._id.toString(),
   name: accountDoc.name || fallbackName || accountDoc.email,
   permisions: accountDoc.permisions || [],
@@ -22,7 +26,11 @@ const buildStaffAccount = (accountDoc: any, fallbackName?: string, type = "emplo
   type,
 });
 
-export const authenticateJWT = async (request: AuthRequest, response: Response, next: NextFunction) => {
+export const authenticateJWT = async (
+  request: AuthRequest,
+  response: Response,
+  next: NextFunction,
+) => {
   const authHeader = request.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -37,14 +45,20 @@ export const authenticateJWT = async (request: AuthRequest, response: Response, 
     let decoded: { id: string; role?: string; name?: string } | undefined;
     for (const candidate of jwtSecrets) {
       try {
-        decoded = jwt.verify(token, candidate) as { id: string; role?: string; name?: string };
+        decoded = jwt.verify(token, candidate) as {
+          id: string;
+          role?: string;
+          name?: string;
+        };
         break;
       } catch {
         // try next candidate
       }
     }
     if (!decoded) {
-      console.log("JWT Auth error: none of the known secrets matched the token signature");
+      console.log(
+        "JWT Auth error: none of the known secrets matched the token signature",
+      );
       response.status(401).json({ message: "Invalid token" });
       return;
     }
@@ -62,7 +76,10 @@ export const authenticateJWT = async (request: AuthRequest, response: Response, 
     if (adminDoc) {
       request.account = {
         _id: adminDoc._id.toString(),
-        name: adminDoc.name || name || (adminDoc.type === "super admin" ? "Super Admin" : "Administrator"),
+        name:
+          adminDoc.name ||
+          name ||
+          (adminDoc.type === "super admin" ? "Super Admin" : "Administrator"),
         permisions: ["all"],
         password: "",
         email: adminDoc.email,
@@ -80,4 +97,15 @@ export const authenticateJWT = async (request: AuthRequest, response: Response, 
     console.log("JWT Auth error:", err);
     response.status(401).json({ message: "Invalid token" });
   }
+};
+
+export const authenticateChatSender = (
+  request: AuthRequest,
+  response: Response,
+  next: NextFunction,
+) => {
+  if (request.body?.user === "staff") {
+    return authenticateJWT(request, response, next);
+  }
+  next();
 };

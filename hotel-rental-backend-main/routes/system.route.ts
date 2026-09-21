@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { SystemController } from "../controller/system.controller";
 import { upload } from "../utils/upload";
-import { authenticateJWT } from "../middleware/auth";
+import { authenticateJWT, authenticateChatSender } from "../middleware/auth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { attachTokenFromQuery } from "../middleware/sseAuth";
 import { authLimiter, otpLimiter } from "../config/rateLimit";
@@ -45,7 +45,7 @@ route.delete("/notifications/:id", adminAuth, SystemController.deleteNotificatio
 route.get("/chat", authenticateJWT, SystemController.getAllChats)
 route.get("/chat/:id", SystemController.getChat)
 route.post("/chat", SystemController.createChat)
-route.post("/chat/message", SystemController.sendChatMessage)
+route.post("/chat/message", authenticateChatSender, SystemController.sendChatMessage)
 route.put("/chat/:id/status", authenticateJWT, SystemController.updateChatStatus)
 route.put("/chat/:id/seen", authenticateJWT, SystemController.markChatAsSeen)
 route.delete("/chat/:id", authenticateJWT, SystemController.deleteChat)

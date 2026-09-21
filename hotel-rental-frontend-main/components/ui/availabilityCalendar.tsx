@@ -576,7 +576,7 @@ export function AvailabilityCalendar() {
                         </p>
                       </div>
                       <p className="text-[10px] text-muted-foreground pl-4">
-                        ₱{room.price.toLocaleString()}/night
+                        ₱{room.price.toLocaleString()}/day
                         {room.discount > 0 ? ` · ${room.discount}% off` : ""}
                       </p>
                     </td>

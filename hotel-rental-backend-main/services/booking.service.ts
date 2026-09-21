@@ -141,4 +141,40 @@ export class BookingService {
   static async markOverdueNotified(id: string) {
     await BookingsModel.findByIdAndUpdate(id, { overdueNotified: true });
   }
+
+  static async getTodayGraceCandidates(dateStr: string) {
+    return BookingsModel.find({
+      arrivalDate: dateStr,
+      status: "reservation",
+      graceNotified: { $ne: true },
+    });
+  }
+
+  static async markGraceNotified(id: string) {
+    await BookingsModel.findByIdAndUpdate(id, { graceNotified: true });
+  }
+
+  static async claimArrivalNotification(id: string): Promise<boolean> {
+    const claimed = await BookingsModel.findOneAndUpdate(
+      { _id: id, arrivalNotified: { $ne: true } },
+      { arrivalNotified: true },
+    );
+    return !!claimed;
+  }
+
+  static async claimOverdueNotification(id: string): Promise<boolean> {
+    const claimed = await BookingsModel.findOneAndUpdate(
+      { _id: id, overdueNotified: { $ne: true } },
+      { overdueNotified: true },
+    );
+    return !!claimed;
+  }
+
+  static async claimGraceNotification(id: string): Promise<boolean> {
+    const claimed = await BookingsModel.findOneAndUpdate(
+      { _id: id, graceNotified: { $ne: true } },
+      { graceNotified: true },
+    );
+    return !!claimed;
+  }
 }

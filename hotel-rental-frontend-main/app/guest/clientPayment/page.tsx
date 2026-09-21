@@ -229,7 +229,7 @@ function PaymentSuccessContent() {
                       {bookingInfo.room.category}
                     </p>
                     <p className="text-xs font-semibold text-[#900546] dark:text-[#F968AC] mt-0.5">
-                      ₱{bookingInfo.room.price.toLocaleString()}/night
+                      ₱{bookingInfo.room.price.toLocaleString()}/day
                     </p>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-1 flex items-center gap-1">
                       <Clock className="size-3 text-[#618685]" />

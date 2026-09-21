@@ -43,6 +43,7 @@ export interface bookingInterfaceInput {
     arrivalTime: string,
     arrivalNotified?: boolean,
     overdueNotified?: boolean,
+    graceNotified?: boolean,
     room : string
 }
 
@@ -65,5 +66,6 @@ export interface bookingInterface  {
     arrivalTime: string,
     arrivalNotified?: boolean,
     overdueNotified?: boolean,
+    graceNotified?: boolean,
     room : roomInterface,
 }
