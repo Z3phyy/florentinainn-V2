@@ -14,7 +14,7 @@ import { SystemService } from "../services/system.service";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { verifyOnlinePayment } from "../utils/verifyPayment";
-// import { sendReservationVoucherEmail } from "../utils/sendEmail";
+import { sendReservationVoucherEmail } from "../utils/sendEmail";
 import { localDateStr } from "../utils/date";
 import {
   validateGuestName,
@@ -720,6 +720,47 @@ export class BookingController {
     }
   };
 
+  static reservationSession = async (
+    request: AuthRequest,
+    response: Response,
+  ) => {
+    try {
+      const { bookingId, sessionId, gateway } = request.body;
+
+      if (!bookingId || typeof bookingId !== "string") {
+        response.status(400).send("Missing booking reference");
+        return;
+      }
+      if (!sessionId || typeof sessionId !== "string") {
+        response.status(400).send("Missing payment session reference");
+        return;
+      }
+
+      const booking = await BookingService.get(bookingId);
+      if (!booking) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      if (booking.status !== "unpaid") {
+        response.send("ok");
+        return;
+      }
+
+      await BookingService.setPaymentSession(bookingId, {
+        sessionId,
+        gateway: gateway === "stripe" ? "stripe" : "paymongo",
+      });
+
+      response.send("ok");
+    } catch (error) {
+      console.log(
+        "Failed to attach payment session: " + (error as Error).message,
+      );
+      response.status(500).send("Failed to attach payment session");
+    }
+  };
+
   static reservationPayment = async (
     request: AuthRequest,
     response: Response,
@@ -770,8 +811,16 @@ export class BookingController {
         return;
       }
 
-      if (!sessionId) {
-        response.status(402).send("Payment verification required");
+      const effectiveGateway =
+        (booking as any).paymentGateway || gateway || "paymongo";
+      const effectiveSessionId = (booking as any).paymentSessionId || sessionId;
+
+      if (!effectiveSessionId) {
+        response.status(402).json({
+          status: "failed",
+          message:
+            "No payment session is on record for this booking. Please restart checkout.",
+        });
         return;
       }
 
@@ -780,7 +829,10 @@ export class BookingController {
       // the session actually exists, belongs to this booking, and was paid.
       let verified;
       try {
-        verified = await verifyOnlinePayment(gateway || "paymongo", sessionId);
+        verified = await verifyOnlinePayment(
+          effectiveGateway,
+          effectiveSessionId,
+        );
       } catch (verifyError) {
         console.log(
           "Payment verification service error: " +
@@ -793,7 +845,19 @@ export class BookingController {
       }
 
       if (!verified.paid) {
-        response.status(402).send("Payment not confirmed by gateway");
+        if (verified.status === "failed") {
+          response.status(402).json({
+            status: "failed",
+            message:
+              "Payment was not completed by the gateway. Please try again or contact the front desk.",
+          });
+        } else {
+          response.status(402).json({
+            status: "pending",
+            message:
+              "Your payment is still being confirmed. Please wait a moment and refresh this page.",
+          });
+        }
         return;
       }
 
@@ -810,7 +874,12 @@ export class BookingController {
         return;
       }
 
-      await BookingService.updateStatus(bookingId, "reservation");
+      const claimedBooking =
+        await BookingService.claimReservationPayment(bookingId);
+      if (!claimedBooking) {
+        response.send("success");
+        return;
+      }
 
       const roomId = booking.room?._id
         ? String(booking.room._id)
@@ -870,28 +939,27 @@ export class BookingController {
       });
 
       // Email the guest their printable payment voucher so it can be reopened
-      // from their inbox without keeping the browser tab open.
       if (booking.clientEmail) {
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-        const voucherUrl = `${frontendUrl}/guest/clientPayment?bookingId=${bookingId}&amount=${paidAmount}&gateway=${gateway || "paymongo"}&session_id=${sessionId}`;
+        const voucherUrl = `${frontendUrl}/guest/clientPayment?bookingId=${bookingId}&amount=${paidAmount}&gateway=${effectiveGateway}`;
         const roomCategory =
           booking.room && typeof booking.room === "object"
             ? (booking.room as { category?: string }).category
             : undefined;
 
         try {
-          // await sendReservationVoucherEmail({
-          //   to: booking.clientEmail,
-          //   guestName: booking.clientName,
-          //   bookingId: String(bookingId),
-          //   voucherUrl,
-          //   amount: paidAmount,
-          //   roomCategory,
-          //   arrivalDate: booking.arrivalDate,
-          //   arrivalTime: booking.arrivalTime,
-          //   departureDate: booking.departureDate,
-          //   refNumber: generatedRef,
-          // });
+          await sendReservationVoucherEmail({
+            to: booking.clientEmail,
+            guestName: booking.clientName,
+            bookingId: String(bookingId),
+            voucherUrl,
+            amount: paidAmount,
+            roomCategory,
+            arrivalDate: booking.arrivalDate,
+            arrivalTime: booking.arrivalTime,
+            departureDate: booking.departureDate,
+            refNumber: generatedRef,
+          });
         } catch (emailError) {
           console.log("Voucher email failed: " + (emailError as Error).message);
         }

@@ -25,6 +25,24 @@ export class BookingService {
     await BookingsModel.findByIdAndUpdate(id, { status });
   }
 
+  static async setPaymentSession(
+    id: string,
+    data: { sessionId: string; gateway: string },
+  ) {
+    await BookingsModel.findByIdAndUpdate(id, {
+      paymentSessionId: data.sessionId,
+      paymentGateway: data.gateway,
+    });
+  }
+
+  static async claimReservationPayment(id: string) {
+    return BookingsModel.findOneAndUpdate(
+      { _id: id, status: "unpaid" },
+      { status: "reservation" },
+      { new: true },
+    ).populate("room");
+  }
+
   static async setDepartureDate(id: string, departureDate: string) {
     await BookingsModel.findByIdAndUpdate(id, { departureDate });
   }

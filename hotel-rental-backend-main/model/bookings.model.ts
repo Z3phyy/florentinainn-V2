@@ -8,6 +8,8 @@ const BookingsSchema = new Schema({
   paymentAmount: { type: Number, default: 0 },
   paymentMethod: { type: String, default: "" },
   paymentRefNumber: { type: String, default: "" },
+  paymentSessionId: { type: String, default: "" },
+  paymentGateway: { type: String, default: "" },
   totalAmount: { type: Number, default: 0 },
   type: { type: String, required: true },
   status: { type: String, required: true },

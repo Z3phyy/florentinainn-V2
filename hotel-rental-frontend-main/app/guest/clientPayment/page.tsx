@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import axiosInstance from "@/app/utils/axios";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import {
   CheckCircle2,
   Printer,
@@ -18,6 +18,7 @@ import {
   Receipt,
   Download,
   ExternalLink,
+  Loader2,
   X,
 } from "lucide-react";
 import { bookingInterface } from "@/app/types/bookings.type";
@@ -67,15 +68,32 @@ function PaymentSuccessContent() {
 
   const [hasCalled, setHasCalled] = useState(false);
   const [paymentError, setPaymentError] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const retryCountRef = useRef(0);
+  const MAX_CLIENT_RETRIES = 3;
+
+  const CONFIRMED_STATUSES = ["reservation", "active", "completed"];
+  const alreadyConfirmed = bookingInfo
+    ? CONFIRMED_STATUSES.includes(bookingInfo.status)
+    : false;
 
   useEffect(() => {
     if (
       bookingId &&
       amount &&
       !hasCalled &&
-      sessionId &&
+      !alreadyConfirmed &&
+      !paymentMutation.isPending &&
       bookingInfo?.clientName
     ) {
+      let storedSessionId: string | null = null;
+      try {
+        storedSessionId = sessionStorage.getItem(
+          `paymongo_session_${bookingId}`,
+        );
+      } catch {}
+
       paymentMutation.mutate(
         {
           bookingId,
@@ -84,19 +102,54 @@ function PaymentSuccessContent() {
           method: "Online Payment",
           refNumber: `RSV-${bookingId.slice(-6).toUpperCase()}`,
           gateway,
-          sessionId,
+          sessionId: sessionId || storedSessionId || undefined,
         },
         {
           onSuccess: () => {
+            setPendingMessage(null);
             setHasCalled(true);
           },
-          onError: () => {
-            setPaymentError(true);
+          onError: (err: unknown) => {
+            const data = (err as { response?: { data?: unknown } })?.response
+              ?.data;
+            const errStatus =
+              data && typeof data === "object"
+                ? (data as { status?: unknown }).status
+                : undefined;
+            const message =
+              data && typeof data === "object"
+                ? (data as { message?: unknown }).message
+                : undefined;
+
+            if (
+              errStatus === "pending" &&
+              retryCountRef.current < MAX_CLIENT_RETRIES
+            ) {
+              retryCountRef.current += 1;
+              setPendingMessage(
+                typeof message === "string"
+                  ? message
+                  : "Your payment is still being confirmed.",
+              );
+              setTimeout(() => setRetryTick((t) => t + 1), 3000);
+            } else {
+              setPendingMessage(null);
+              setPaymentError(true);
+            }
           },
         },
       );
     }
-  }, [bookingInfo, bookingId, amount, gateway, sessionId, hasCalled]);
+  }, [
+    bookingInfo,
+    bookingId,
+    amount,
+    gateway,
+    sessionId,
+    hasCalled,
+    alreadyConfirmed,
+    retryTick,
+  ]);
 
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-PH", {
@@ -164,12 +217,22 @@ function PaymentSuccessContent() {
           {/* Left Column: Confirmation & Stay Details (5 cols) */}
           <div className="lg:col-span-5 space-y-4 print:hidden">
             <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-6 shadow-xs text-center space-y-4">
-              {/* Success Badge */}
-              <div className="size-16 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto ring-8 ring-emerald-500/5">
+              {/* Status Badge */}
+              <div
+                className={`size-16 rounded-full flex items-center justify-center mx-auto ring-8 ${
+                  paymentError
+                    ? "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/5"
+                    : hasCalled || alreadyConfirmed
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/5"
+                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/5"
+                }`}
+              >
                 {paymentError ? (
                   <X className="size-9 text-red-500" />
-                ) : (
+                ) : hasCalled || alreadyConfirmed ? (
                   <CheckCircle2 className="size-9" />
+                ) : (
+                  <Loader2 className="size-9 animate-spin" />
                 )}
               </div>
 
@@ -187,7 +250,7 @@ function PaymentSuccessContent() {
                       Please contact the front desk with your reference.
                     </p>
                   </>
-                ) : (
+                ) : hasCalled || alreadyConfirmed ? (
                   <>
                     <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mb-2">
                       <ShieldCheck className="size-3.5" />
@@ -202,6 +265,19 @@ function PaymentSuccessContent() {
                         {bookingInfo?.clientName || "valued guest"}
                       </strong>
                       . Your suite is reserved at Florentina Inn.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 mb-2">
+                      Confirming Payment
+                    </div>
+                    <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
+                      Confirming Your Payment…
+                    </h1>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
+                      {pendingMessage ||
+                        "We're verifying your payment with the gateway. This only takes a moment — please don't close this page."}
                     </p>
                   </>
                 )}
