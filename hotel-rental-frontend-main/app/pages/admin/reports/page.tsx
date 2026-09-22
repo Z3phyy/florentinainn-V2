@@ -7,6 +7,9 @@ import { formatTime12hr } from "@/app/utils/customFunction";
 import { roomInterface } from "@/app/types/room.type";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { paymentInterface } from "@/app/types/payment.type";
+import { systemInterface } from "@/app/types/system.type";
+import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
+import { printHtmlDocument } from "@/app/utils/printDocument";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -43,14 +46,14 @@ interface PopularRoomEntry {
 }
 
 interface RevenueReportData {
-  month: number;
+  month: MonthFilter;
   year: number;
   totalRevenue: number;
   payments: paymentInterface[];
 }
 
 interface PopularRoomReportData {
-  month: number;
+  month: MonthFilter;
   year: number;
   popularRooms: PopularRoomEntry[];
 }
@@ -58,15 +61,46 @@ interface PopularRoomReportData {
 // ─── Constants ───
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 type ReportType = "occupancy" | "revenue" | "reservation" | "popular" | null;
 
+export const ALL_MONTHS = "all" as const;
+type MonthFilter = number | typeof ALL_MONTHS;
+
+function periodLabel(month: MonthFilter, year: number): string {
+  return month === ALL_MONTHS
+    ? `All Months ${year}`
+    : `${MONTHS[month]} ${year}`;
+}
+
+function periodFileLabel(month: MonthFilter, year: number): string {
+  return month === ALL_MONTHS
+    ? `All_Months_${year}`
+    : `${MONTHS[month]}_${year}`;
+}
+
+function monthQueryValue(month: MonthFilter): string {
+  return month === ALL_MONTHS ? ALL_MONTHS : String(month);
+}
+
 // Helper to trigger browser CSV file download
 function downloadCSV(filename: string, csvContent: string) {
-  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["\uFEFF" + csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
@@ -86,6 +120,7 @@ function ReportModal({
   children,
   onPrint,
   onExportCSV,
+  printing = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -93,13 +128,15 @@ function ReportModal({
   children: React.ReactNode;
   onPrint: () => void;
   onExportCSV?: () => void;
+  printing?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto p-0 gap-0">
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">
-          Official {title} statement and operational breakdown for Florentina Inn
+          Official {title} statement and operational breakdown for Florentina
+          Inn
         </DialogDescription>
         {/* Toolbar */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background px-6 py-3 no-print">
@@ -123,15 +160,21 @@ function ReportModal({
               variant="outline"
               size="sm"
               onClick={onPrint}
-              className="gap-1.5 text-xs h-8.5 bg-[#900546] hover:bg-[#720336] text-white border-transparent cursor-pointer"
+              disabled={printing}
+              className="gap-1.5 text-xs h-8.5 bg-[#900546] hover:bg-[#720336] text-white border-transparent cursor-pointer disabled:opacity-60"
             >
               <Printer className="size-3.5" />
-              Download / Print PDF
+              {printing ? "Preparing PDF..." : "Download / Print PDF"}
             </Button>
           </div>
         </div>
         {/* Report Content */}
-        <div id="printable-report-sheet" className="p-6 bg-white dark:bg-[#1A0E13] text-[#130005] dark:text-white">{children}</div>
+        <div
+          id="printable-report-sheet"
+          className="p-6 bg-white dark:bg-[#1A0E13] text-[#130005] dark:text-white"
+        >
+          {children}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -139,26 +182,58 @@ function ReportModal({
 
 // ─── Paper Report Layout ───
 
-function PaperHeader({ title, month, year }: { title: string; month?: number; year?: number }) {
+interface ReportBrand {
+  hotelName: string;
+  logoUrl: string;
+}
+
+function PaperHeader({
+  title,
+  month,
+  year,
+  brand,
+}: {
+  title: string;
+  month?: MonthFilter;
+  year?: number;
+  brand: ReportBrand;
+}) {
   const today = new Date();
   return (
     <div className="text-center mb-8">
       {/* Decorative top border */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-3 mb-4">
         <div className="h-[2px] flex-1 bg-gradient-to-r from-transparent via-[#900546]/40 to-transparent" />
-        <Building2 className="size-5 text-[#900546]" />
+        <img
+          src={brand.logoUrl}
+          alt={`${brand.hotelName} logo`}
+          className="report-logo"
+          style={{
+            height: "72px",
+            width: "auto",
+            maxWidth: "200px",
+            objectFit: "contain",
+          }}
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+          }}
+        />
         <div className="h-[2px] flex-1 bg-gradient-to-r from-transparent via-[#900546]/40 to-transparent" />
       </div>
+      <p className="text-sm font-bold uppercase tracking-[0.18em] text-[#900546] dark:text-[#F968AC] mb-1">
+        {brand.hotelName}
+      </p>
       <h1 className="text-2xl font-bold tracking-tight text-[#130005] dark:text-white uppercase font-serif">
         {title}
       </h1>
       {month !== undefined && year !== undefined && (
         <p className="text-sm text-[#5C454B] dark:text-gray-300 mt-1 font-medium">
-          For the period of {MONTHS[month]} {year}
+          For the period of {periodLabel(month, year)}
         </p>
       )}
       <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
-        Date Generated: {today.toLocaleDateString("en-US", {
+        Date Generated:{" "}
+        {today.toLocaleDateString("en-US", {
           year: "numeric",
           month: "long",
           day: "numeric",
@@ -170,13 +245,21 @@ function PaperHeader({ title, month, year }: { title: string; month?: number; ye
   );
 }
 
-function PaperFooter() {
+function PaperFooter({ brand }: { brand: ReportBrand }) {
   return (
     <div className="mt-10 pt-4 border-t border-border print-footer">
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-        <div className="flex items-center gap-1">
-          <Building2 className="size-3 text-[#900546]" />
-          <span>Florentina Inn • Hotel Management System</span>
+        <div className="flex items-center gap-1.5">
+          <img
+            src={brand.logoUrl}
+            alt=""
+            className="report-logo-mark"
+            style={{ height: "18px", width: "auto", objectFit: "contain" }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+            }}
+          />
+          <span>{brand.hotelName} • Hotel Management System</span>
         </div>
         <div className="flex items-center gap-4">
           <span>Report ID: RPT-{Date.now().toString(36).toUpperCase()}</span>
@@ -221,7 +304,9 @@ function SignatureSection() {
       <div className="text-center">
         <div className="h-px bg-border mb-1" />
         <p className="text-xs font-medium text-foreground">Prepared By</p>
-        <p className="text-[10px] text-muted-foreground">Authorized Signatory</p>
+        <p className="text-[10px] text-muted-foreground">
+          Authorized Signatory
+        </p>
       </div>
       <div className="text-center">
         <div className="h-px bg-border mb-1" />
@@ -234,15 +319,23 @@ function SignatureSection() {
 
 // ─── Occupancy Report Content ───
 
-function OccupancyReportContent({ rooms }: { rooms: roomInterface[] }) {
+function OccupancyReportContent({
+  rooms,
+  brand,
+}: {
+  rooms: roomInterface[];
+  brand: ReportBrand;
+}) {
   const total = rooms.length;
   const available = rooms.filter((r) => r.status === "available").length;
   const occupied = rooms.filter((r) => r.status === "occupied").length;
-  const maintenanceRooms = rooms.filter((r) => r.status === "maintenance").length;
+  const maintenanceRooms = rooms.filter(
+    (r) => r.status === "maintenance",
+  ).length;
 
   return (
     <div className="relative">
-      <PaperHeader title="Occupancy Status Report" />
+      <PaperHeader title="Occupancy Status Report" brand={brand} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-3 mb-6">
@@ -250,7 +343,11 @@ function OccupancyReportContent({ rooms }: { rooms: roomInterface[] }) {
           { label: "Total Rooms", value: total, color: "text-foreground" },
           { label: "Available", value: available, color: "text-emerald-600" },
           { label: "Occupied", value: occupied, color: "text-amber-600" },
-          { label: "Maintenance", value: maintenanceRooms, color: "text-red-600" },
+          {
+            label: "Maintenance",
+            value: maintenanceRooms,
+            color: "text-red-600",
+          },
         ].map((item) => (
           <div
             key={item.label}
@@ -283,23 +380,36 @@ function OccupancyReportContent({ rooms }: { rooms: roomInterface[] }) {
       </div>
 
       <PaperTable
-        headers={["#", "Room #", "Category", "Price (₱)", "Current Status", "Remarks"]}
+        headers={[
+          "#",
+          "Room #",
+          "Category",
+          "Price (₱)",
+          "Current Status",
+          "Remarks",
+        ]}
       >
         {rooms.map((room, i) => {
           const statusColor =
             room.status === "available"
               ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30"
               : room.status === "occupied"
-              ? "text-amber-600 bg-amber-50 dark:bg-amber-950/30"
-              : room.status === "reserved"
-              ? "text-violet-600 bg-violet-50 dark:bg-violet-950/30"
-              : "text-red-600 bg-red-50 dark:bg-red-950/30";
+                ? "text-amber-600 bg-amber-50 dark:bg-amber-950/30"
+                : room.status === "reserved"
+                  ? "text-violet-600 bg-violet-50 dark:bg-violet-950/30"
+                  : "text-red-600 bg-red-50 dark:bg-red-950/30";
           return (
             <tr key={room._id} className="hover:bg-muted/30">
-              <td className="px-4 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
-              <td className="px-4 py-2.5 font-bold text-primary">{room.roomNumber ? `Room ${room.roomNumber}` : "—"}</td>
+              <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                {i + 1}
+              </td>
+              <td className="px-4 py-2.5 font-bold text-primary">
+                {room.roomNumber ? `Room ${room.roomNumber}` : "—"}
+              </td>
               <td className="px-4 py-2.5 font-medium">{room.category}</td>
-              <td className="px-4 py-2.5 font-mono">₱{room.price.toLocaleString()}</td>
+              <td className="px-4 py-2.5 font-mono">
+                ₱{room.price.toLocaleString()}
+              </td>
               <td className="px-4 py-2.5">
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${statusColor}`}
@@ -316,27 +426,47 @@ function OccupancyReportContent({ rooms }: { rooms: roomInterface[] }) {
       </PaperTable>
 
       <SignatureSection />
-      <PaperFooter />
+      <PaperFooter brand={brand} />
     </div>
   );
 }
 
 // ─── Revenue Report Content ───
 
-function RevenueReportContent({ data }: { data: RevenueReportData }) {
+function RevenueReportContent({
+  data,
+  brand,
+}: {
+  data: RevenueReportData;
+  brand: ReportBrand;
+}) {
   const { payments, totalRevenue } = data;
+  const period = periodLabel(data.month, data.year);
 
   return (
     <div className="relative">
-      <PaperHeader title="Monthly Revenue Report" month={data.month} year={data.year} />
+      <PaperHeader
+        title={
+          data.month === ALL_MONTHS
+            ? "Annual Revenue Report"
+            : "Monthly Revenue Report"
+        }
+        month={data.month}
+        year={data.year}
+        brand={brand}
+      />
 
       {/* Revenue Summary */}
       <div className="rounded-lg border-2 border-primary/20 bg-primary/[0.02] p-5 mb-6 text-center">
         <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-          Total Revenue for {MONTHS[data.month]} {data.year}
+          Total Revenue for {period}
         </p>
         <p className="text-4xl font-bold text-foreground">
-          &#x20B1;{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          &#x20B1;
+          {totalRevenue.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
           Total Transactions: {payments.length}
@@ -350,7 +480,9 @@ function RevenueReportContent({ data }: { data: RevenueReportData }) {
           >
             {payments.map((p, i) => (
               <tr key={p._id} className="hover:bg-muted/30">
-                <td className="px-4 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                  {i + 1}
+                </td>
                 <td className="px-4 py-2.5 font-medium">
                   {new Date(p.date).toLocaleDateString("en-US", {
                     year: "numeric",
@@ -359,9 +491,15 @@ function RevenueReportContent({ data }: { data: RevenueReportData }) {
                   })}
                 </td>
                 <td className="px-4 py-2.5 font-mono font-semibold text-green-600 dark:text-green-400">
-                  &#x20B1;{p.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  &#x20B1;
+                  {p.amount.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </td>
-                <td className="px-4 py-2.5 text-muted-foreground">{p.receivedBy}</td>
+                <td className="px-4 py-2.5 text-muted-foreground">
+                  {p.receivedBy}
+                </td>
                 <td className="px-4 py-2.5 text-[10px] font-mono text-muted-foreground">
                   {p._id.slice(-8).toUpperCase()}
                 </td>
@@ -376,7 +514,11 @@ function RevenueReportContent({ data }: { data: RevenueReportData }) {
                 Grand Total
               </span>
               <span className="text-lg font-bold">
-                &#x20B1;{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                &#x20B1;
+                {totalRevenue.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </span>
             </div>
           </div>
@@ -385,12 +527,14 @@ function RevenueReportContent({ data }: { data: RevenueReportData }) {
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
           <TrendingUp className="size-10 mb-3" />
           <p className="text-sm font-medium">No revenue records found</p>
-          <p className="text-xs mt-1">No payments were recorded for this period.</p>
+          <p className="text-xs mt-1">
+            No payments were recorded for this period.
+          </p>
         </div>
       )}
 
       <SignatureSection />
-      <PaperFooter />
+      <PaperFooter brand={brand} />
     </div>
   );
 }
@@ -401,21 +545,38 @@ function ReservationReportContent({
   bookings,
   month,
   year,
+  brand,
 }: {
   bookings: bookingInterface[];
-  month: number;
+  month: MonthFilter;
   year: number;
+  brand: ReportBrand;
 }) {
   return (
     <div className="relative">
-      <PaperHeader title="Reservation Report" month={month} year={year} />
+      <PaperHeader
+        title="Reservation Report"
+        month={month}
+        year={year}
+        brand={brand}
+      />
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3 mb-6">
         {[
           { label: "Total Reservations", value: bookings.length },
-          { label: "Active", value: bookings.filter((b) => b.status === "active" || b.status === "reservation").length },
-          { label: "Completed/Canceled", value: bookings.filter((b) => b.status === "completed" || b.status === "canceled").length },
+          {
+            label: "Active",
+            value: bookings.filter(
+              (b) => b.status === "active" || b.status === "reservation",
+            ).length,
+          },
+          {
+            label: "Completed/Canceled",
+            value: bookings.filter(
+              (b) => b.status === "completed" || b.status === "canceled",
+            ).length,
+          },
         ].map((item) => (
           <div
             key={item.label}
@@ -431,18 +592,27 @@ function ReservationReportContent({
 
       {bookings.length > 0 ? (
         <PaperTable
-          headers={["#", "Client Name", "Room", "Arrival Date", "Arrival Time", "Status"]}
+          headers={[
+            "#",
+            "Client Name",
+            "Room",
+            "Arrival Date",
+            "Arrival Time",
+            "Status",
+          ]}
         >
           {bookings.map((b, i) => {
             const statusBg =
               b.status === "active" || b.status === "reservation"
                 ? "text-blue-600 bg-blue-50 dark:bg-blue-950/30"
                 : b.status === "completed"
-                ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30"
-                : "text-muted-foreground bg-muted";
+                  ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30"
+                  : "text-muted-foreground bg-muted";
             return (
               <tr key={b._id} className="hover:bg-muted/30">
-                <td className="px-4 py-2.5 text-xs text-muted-foreground">{i + 1}</td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                  {i + 1}
+                </td>
                 <td className="px-4 py-2.5 font-medium">{b.clientName}</td>
                 <td className="px-4 py-2.5">{b.room?.category || "\u2014"}</td>
                 <td className="px-4 py-2.5">
@@ -469,26 +639,37 @@ function ReservationReportContent({
           <CalendarDays className="size-10 mb-3" />
           <p className="text-sm font-medium">No reservations found</p>
           <p className="text-xs mt-1">
-            No reservations were recorded for {MONTHS[month]} {year}.
+            No reservations were recorded for {periodLabel(month, year)}.
           </p>
         </div>
       )}
 
       <SignatureSection />
-      <PaperFooter />
+      <PaperFooter brand={brand} />
     </div>
   );
 }
 
 // ─── Popular Room Report Content ───
 
-function PopularRoomReportContent({ data }: { data: PopularRoomReportData }) {
+function PopularRoomReportContent({
+  data,
+  brand,
+}: {
+  data: PopularRoomReportData;
+  brand: ReportBrand;
+}) {
   const { popularRooms, month, year } = data;
   const maxCount = popularRooms.length > 0 ? popularRooms[0].count : 0;
 
   return (
     <div className="relative">
-      <PaperHeader title="Popular Room Report" month={month} year={year} />
+      <PaperHeader
+        title="Popular Room Report"
+        month={month}
+        year={year}
+        brand={brand}
+      />
 
       {/* Summary */}
       <div className="rounded-lg border border-border bg-muted/30 p-4 mb-6">
@@ -503,32 +684,49 @@ function PopularRoomReportContent({ data }: { data: PopularRoomReportData }) {
             </span>
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground text-center">No data available</p>
+          <p className="text-sm text-muted-foreground text-center">
+            No data available
+          </p>
         )}
       </div>
 
       {popularRooms.length > 0 ? (
         <>
           <PaperTable
-            headers={["Rank", "Room Category", "Price (₱)", "Total Bookings", "Popularity"]}
+            headers={[
+              "Rank",
+              "Room Category",
+              "Price (₱)",
+              "Total Bookings",
+              "Popularity",
+            ]}
           >
             {popularRooms.map((room, i) => {
-              const percentage = maxCount > 0 ? (room.count / maxCount) * 100 : 0;
+              const percentage =
+                maxCount > 0 ? (room.count / maxCount) * 100 : 0;
               const barColor =
                 i === 0
                   ? "bg-amber-500"
                   : i === 1
-                  ? "bg-slate-400"
-                  : i === 2
-                  ? "bg-orange-600"
-                  : "bg-primary/40";
+                    ? "bg-slate-400"
+                    : i === 2
+                      ? "bg-orange-600"
+                      : "bg-primary/40";
               const rankIcon =
-                i === 0 ? "\uD83E\uDD47" : i === 1 ? "\uD83E\uDD48" : i === 2 ? "\uD83E\uDD49" : `#${i + 1}`;
+                i === 0
+                  ? "\uD83E\uDD47"
+                  : i === 1
+                    ? "\uD83E\uDD48"
+                    : i === 2
+                      ? "\uD83E\uDD49"
+                      : `#${i + 1}`;
               return (
                 <tr key={room.category} className="hover:bg-muted/30">
                   <td className="px-4 py-2.5 text-xs">{rankIcon}</td>
                   <td className="px-4 py-2.5 font-medium">{room.category}</td>
-                  <td className="px-4 py-2.5 font-mono">&#x20B1;{room.price.toLocaleString()}</td>
+                  <td className="px-4 py-2.5 font-mono">
+                    &#x20B1;{room.price.toLocaleString()}
+                  </td>
                   <td className="px-4 py-2.5">
                     <span className="font-bold text-lg">{room.count}</span>
                   </td>
@@ -573,166 +771,143 @@ function PopularRoomReportContent({ data }: { data: PopularRoomReportData }) {
           <BarChart3 className="size-10 mb-3" />
           <p className="text-sm font-medium">No booking data found</p>
           <p className="text-xs mt-1">
-            No bookings were recorded for {MONTHS[month]} {year}.
+            No bookings were recorded for {periodLabel(month, year)}.
           </p>
         </div>
       )}
 
       <SignatureSection />
-      <PaperFooter />
+      <PaperFooter brand={brand} />
     </div>
   );
 }
 
-// ─── Print utility — silent in-page iframe print renderer (no tabs/popups) ───
+const REPORT_PRINT_STYLES = `
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #111827;
+  }
+  body {
+    background-color: #ffffff;
+    color: #111827;
+    padding: 12px;
+  }
+  h1, h2, h3 {
+    font-family: Georgia, serif;
+    color: #111827;
+  }
+  /* Hotel logo — fixed height, automatic width, never stretched. */
+  img.report-logo {
+    height: 72px !important;
+    width: auto !important;
+    max-width: 200px;
+    object-fit: contain;
+    display: inline-block;
+  }
+  img.report-logo-mark {
+    height: 18px !important;
+    width: auto !important;
+    object-fit: contain;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 14px;
+    margin-bottom: 20px;
+    font-size: 11px;
+  }
+  th {
+    background-color: #f3f4f6 !important;
+    color: #374151 !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    padding: 9px 12px;
+    border: 1px solid #e5e7eb;
+    text-align: left;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  td {
+    padding: 9px 12px;
+    border: 1px solid #e5e7eb;
+    font-size: 11px;
+    color: #1f2937;
+  }
+  tr:nth-child(even) td {
+    background-color: #f9fafb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .grid { display: grid; }
+  .grid-cols-2 { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .grid-cols-3 { grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .grid-cols-4 { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .text-center { text-align: center; }
+  .text-right { text-align: right; }
+  .font-bold { font-weight: 700; }
+  .font-semibold { font-weight: 600; }
+  .font-medium { font-weight: 500; }
+  .font-mono { font-family: monospace; }
+  .uppercase { text-transform: uppercase; }
+  .text-sm { font-size: 13px; }
+  .text-xs { font-size: 11px; }
+  .text-2xl { font-size: 22px; }
+  .text-4xl { font-size: 30px; }
+  .rounded-lg { border-radius: 8px; }
+  .border { border: 1px solid #e5e7eb; }
+  .border-2 { border: 2px solid #900546; }
+  .p-3 { padding: 10px; }
+  .p-4 { padding: 14px; }
+  .p-5 { padding: 18px; }
+  .mb-1 { margin-bottom: 4px; }
+  .mb-2 { margin-bottom: 8px; }
+  .mb-4 { margin-bottom: 14px; }
+  .mb-6 { margin-bottom: 20px; }
+  .mb-8 { margin-bottom: 28px; }
+  .mt-0\\.5 { margin-top: 2px; }
+  .mt-1 { margin-top: 4px; }
+  .mt-2 { margin-top: 8px; }
+  .mt-4 { margin-top: 14px; }
+  .mt-10 { margin-top: 36px; }
+  .pt-4 { padding-top: 14px; }
+  .border-t { border-top: 1px solid #e5e7eb; }
+  .text-emerald-600 { color: #059669 !important; }
+  .text-amber-600 { color: #d97706 !important; }
+  .text-red-600 { color: #dc2626 !important; }
+  .text-green-600 { color: #16a34a !important; }
+  .text-primary { color: #900546 !important; }
+  .text-muted-foreground { color: #6b7280 !important; }
+  .bg-muted\\/30 { background-color: #f9fafb !important; }
+  .flex { display: flex; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+`;
 
-function printReport() {
+// Prints the report sheet currently open in the modal. The logo is inlined as
+// a data URI first so a remote (Cloudinary) asset can never print blank.
+async function printReport(
+  hotelName: string,
+  logoUrl: string,
+  documentTitle: string,
+) {
   const elem = document.getElementById("printable-report-sheet");
-  if (!elem) {
-    window.print();
-    return;
-  }
+  if (!elem) return false;
 
-  // Create or reuse hidden iframe
-  let printIframe = document.getElementById("hidden-print-iframe") as HTMLIFrameElement;
-  if (!printIframe) {
-    printIframe = document.createElement("iframe");
-    printIframe.id = "hidden-print-iframe";
-    printIframe.style.position = "fixed";
-    printIframe.style.top = "0";
-    printIframe.style.left = "0";
-    printIframe.style.width = "0";
-    printIframe.style.height = "0";
-    printIframe.style.border = "none";
-    printIframe.style.visibility = "hidden";
-    printIframe.style.zIndex = "-999";
-    document.body.appendChild(printIframe);
-  }
+  const inlineLogo = await getLogoDataUrl(logoUrl);
+  const bodyHtml = elem.innerHTML.split(logoUrl).join(inlineLogo);
 
-  const iframeDoc = printIframe.contentDocument || printIframe.contentWindow?.document;
-  if (!iframeDoc) {
-    window.print();
-    return;
-  }
-
-  iframeDoc.open();
-  iframeDoc.write(`
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <title>Florentina Inn - Official Report</title>
-        <style>
-          @page {
-            size: A4 portrait;
-            margin: 15mm;
-          }
-          * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            color: #111827;
-          }
-          body {
-            background-color: #ffffff;
-            color: #111827;
-            padding: 12px;
-          }
-          h1, h2, h3 {
-            font-family: Georgia, serif;
-            color: #111827;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 14px;
-            margin-bottom: 20px;
-            font-size: 11px;
-          }
-          th {
-            background-color: #f3f4f6 !important;
-            color: #374151 !important;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 10px;
-            letter-spacing: 0.05em;
-            padding: 9px 12px;
-            border: 1px solid #e5e7eb;
-            text-align: left;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          td {
-            padding: 9px 12px;
-            border: 1px solid #e5e7eb;
-            font-size: 11px;
-            color: #1f2937;
-          }
-          tr:nth-child(even) td {
-            background-color: #f9fafb !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .grid {
-            display: grid;
-          }
-          .grid-cols-2 { grid-template-columns: repeat(2, 1fr); gap: 14px; }
-          .grid-cols-3 { grid-template-columns: repeat(3, 1fr); gap: 12px; }
-          .grid-cols-4 { grid-template-columns: repeat(4, 1fr); gap: 10px; }
-          .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          .font-bold { font-weight: 700; }
-          .font-semibold { font-weight: 600; }
-          .font-medium { font-weight: 500; }
-          .font-mono { font-family: monospace; }
-          .uppercase { text-transform: uppercase; }
-          .text-sm { font-size: 13px; }
-          .text-xs { font-size: 11px; }
-          .text-2xl { font-size: 22px; }
-          .text-4xl { font-size: 30px; }
-          .rounded-lg { border-radius: 8px; }
-          .border { border: 1px solid #e5e7eb; }
-          .border-2 { border: 2px solid #900546; }
-          .p-3 { padding: 10px; }
-          .p-4 { padding: 14px; }
-          .p-5 { padding: 18px; }
-          .mb-1 { margin-bottom: 4px; }
-          .mb-2 { margin-bottom: 8px; }
-          .mb-4 { margin-bottom: 14px; }
-          .mb-6 { margin-bottom: 20px; }
-          .mb-8 { margin-bottom: 28px; }
-          .mt-0\\.5 { margin-top: 2px; }
-          .mt-1 { margin-top: 4px; }
-          .mt-2 { margin-top: 8px; }
-          .mt-4 { margin-top: 14px; }
-          .mt-10 { margin-top: 36px; }
-          .pt-4 { padding-top: 14px; }
-          .border-t { border-top: 1px solid #e5e7eb; }
-          .text-emerald-600 { color: #059669 !important; }
-          .text-amber-600 { color: #d97706 !important; }
-          .text-red-600 { color: #dc2626 !important; }
-          .text-green-600 { color: #16a34a !important; }
-          .text-primary { color: #900546 !important; }
-          .text-muted-foreground { color: #6b7280 !important; }
-          .bg-muted\\/30 { background-color: #f9fafb !important; }
-          .flex { display: flex; }
-          .items-center { align-items: center; }
-          .justify-between { justify-content: space-between; }
-          .no-print { display: none !important; }
-        </style>
-      </head>
-      <body>
-        ${elem.innerHTML}
-      </body>
-    </html>
-  `);
-  iframeDoc.close();
-
-  setTimeout(() => {
-    printIframe.contentWindow?.focus();
-    printIframe.contentWindow?.print();
-  }, 200);
+  return printHtmlDocument({
+    title: `${hotelName} - ${documentTitle}`,
+    bodyHtml,
+    styles: REPORT_PRINT_STYLES,
+  });
 }
 
 // ─── Main Page ───
@@ -741,18 +916,28 @@ export default function Page() {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [selectedMonth, setSelectedMonth] = useState<MonthFilter>(currentMonth);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [activeReport, setActiveReport] = useState<ReportType>(null);
   const [reportOpen, setReportOpen] = useState(false);
 
   const reportYears = Array.from({ length: 7 }, (_, i) => currentYear - 6 + i);
+  const monthParam = monthQueryValue(selectedMonth);
+  const selectedPeriod = periodLabel(selectedMonth, selectedYear);
+
+  // ── Hotel branding (uploaded logo from Settings) for report headers ──
+  const { data: systemInfo } = useQuery<systemInterface>({
+    queryKey: ["systeminfo"],
+    queryFn: async () => {
+      const res = await axiosInstance.get("/system");
+      return res.data;
+    },
+  });
+
+  const brand = getBrand(systemInfo);
 
   // ── Fetch all rooms (for occupancy) ──
-  const {
-    data: rooms,
-    isLoading: roomsLoading,
-  } = useQuery<roomInterface[]>({
+  const { data: rooms, isLoading: roomsLoading } = useQuery<roomInterface[]>({
     queryKey: ["rooms"],
     queryFn: async () => {
       const res = await axiosInstance.get("/room");
@@ -761,29 +946,26 @@ export default function Page() {
   });
 
   // ── Fetch payments (for revenue report) ──
-  const {
-    data: revenueData,
-    isLoading: revenueLoading,
-  } = useQuery<RevenueReportData>({
-    queryKey: ["report-revenue", selectedMonth, selectedYear],
-    queryFn: async () => {
-      const res = await axiosInstance.get(
-        `/reports/revenue?month=${selectedMonth}&year=${selectedYear}`
-      );
-      return res.data;
-    },
-    enabled: activeReport === "revenue",
-  });
+  const { data: revenueData, isLoading: revenueLoading } =
+    useQuery<RevenueReportData>({
+      queryKey: ["report-revenue", selectedMonth, selectedYear],
+      queryFn: async () => {
+        const res = await axiosInstance.get(
+          `/reports/revenue?month=${monthParam}&year=${selectedYear}`,
+        );
+        return res.data;
+      },
+      enabled: activeReport === "revenue",
+    });
 
   // ── Fetch reservations (for reservation report) ──
-  const {
-    data: reservations,
-    isLoading: reservationLoading,
-  } = useQuery<bookingInterface[]>({
+  const { data: reservations, isLoading: reservationLoading } = useQuery<
+    bookingInterface[]
+  >({
     queryKey: ["report-reservations", selectedMonth, selectedYear],
     queryFn: async () => {
       const res = await axiosInstance.get(
-        `/reports/reservations?month=${selectedMonth}&year=${selectedYear}`
+        `/reports/reservations?month=${monthParam}&year=${selectedYear}`,
       );
       return res.data;
     },
@@ -791,19 +973,17 @@ export default function Page() {
   });
 
   // ── Fetch popular rooms ──
-  const {
-    data: popularData,
-    isLoading: popularLoading,
-  } = useQuery<PopularRoomReportData>({
-    queryKey: ["report-popular", selectedMonth, selectedYear],
-    queryFn: async () => {
-      const res = await axiosInstance.get(
-        `/reports/popular-rooms?month=${selectedMonth}&year=${selectedYear}`
-      );
-      return res.data;
-    },
-    enabled: activeReport === "popular",
-  });
+  const { data: popularData, isLoading: popularLoading } =
+    useQuery<PopularRoomReportData>({
+      queryKey: ["report-popular", selectedMonth, selectedYear],
+      queryFn: async () => {
+        const res = await axiosInstance.get(
+          `/reports/popular-rooms?month=${monthParam}&year=${selectedYear}`,
+        );
+        return res.data;
+      },
+      enabled: activeReport === "popular",
+    });
 
   // ── Open report handler ──
   const openReport = useCallback((type: ReportType) => {
@@ -817,10 +997,27 @@ export default function Page() {
     setActiveReport(null);
   }, []);
 
-  // ── Print handler ──
-  const handlePrint = useCallback(() => {
-    printReport();
-  }, []);
+  // ── Print handler (same document for PDF download and paper print) ──
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = useCallback(
+    async (documentTitle: string) => {
+      if (isPrinting) return;
+      setIsPrinting(true);
+      try {
+        const printed = await printReport(
+          brand.hotelName,
+          brand.logoUrl,
+          documentTitle,
+        );
+        if (!printed)
+          toast.error("Could not open the print dialog. Please try again.");
+      } finally {
+        setIsPrinting(false);
+      }
+    },
+    [brand.hotelName, brand.logoUrl, isPrinting],
+  );
 
   // ── CSV Export Handlers ──
   const handleExportOccupancyCSV = useCallback(() => {
@@ -832,10 +1029,11 @@ export default function Page() {
     const available = rooms.filter((r) => r.status === "available").length;
     const occupied = rooms.filter((r) => r.status === "occupied").length;
     const maintenance = rooms.filter((r) => r.status === "maintenance").length;
-    const occupancyRate = total > 0 ? ((occupied / total) * 100).toFixed(1) : "0.0";
+    const occupancyRate =
+      total > 0 ? ((occupied / total) * 100).toFixed(1) : "0.0";
 
     const summaryRows = [
-      `"FLORENTINA INN - OCCUPANCY STATUS REPORT"`,
+      `"${brand.hotelName.toUpperCase()} - OCCUPANCY STATUS REPORT"`,
       `"Generated Date","${new Date().toLocaleDateString("en-PH")}"`,
       `"Total Rooms",${total}`,
       `"Available",${available}`,
@@ -859,19 +1057,23 @@ export default function Page() {
     const dateStr = new Date().toISOString().slice(0, 10);
     downloadCSV(`Florentina_Inn_Occupancy_${dateStr}.csv`, csv);
     toast.success("Occupancy report exported to CSV successfully.");
-  }, [rooms]);
+  }, [rooms, brand.hotelName]);
 
   const handleExportRevenueCSV = useCallback(() => {
-    if (!revenueData || !revenueData.payments || revenueData.payments.length === 0) {
-      toast.error("No revenue transactions recorded for this month.");
+    if (
+      !revenueData ||
+      !revenueData.payments ||
+      revenueData.payments.length === 0
+    ) {
+      toast.error(`No revenue transactions recorded for ${selectedPeriod}.`);
       return;
     }
     const { payments, totalRevenue, month, year } = revenueData;
-    const monthName = MONTHS[month];
+    const period = periodLabel(month, year);
 
     const summaryRows = [
-      `"FLORENTINA INN - MONTHLY REVENUE REPORT"`,
-      `"Period","${monthName} ${year}"`,
+      `"${brand.hotelName.toUpperCase()} - ${month === ALL_MONTHS ? "ANNUAL" : "MONTHLY"} REVENUE REPORT"`,
+      `"Period","${period}"`,
       `"Total Revenue (PHP)",${Number(totalRevenue || 0).toFixed(2)}`,
       `"Total Transactions",${payments.length}`,
       `""`,
@@ -880,7 +1082,9 @@ export default function Page() {
 
     const dataRows = payments.map((p, i) => {
       const pDate = p.date ? new Date(p.date) : new Date();
-      const dateStr = !isNaN(pDate.getTime()) ? pDate.toLocaleDateString("en-PH") : "";
+      const dateStr = !isNaN(pDate.getTime())
+        ? pDate.toLocaleDateString("en-PH")
+        : "";
       const ref = `"${(p.refNumber || p._id || "").slice(-8).toUpperCase()}"`;
       const channel = `"${(p.receivedBy || "Front Desk").replace(/"/g, '""')}"`;
       const amt = Number(p.amount || 0).toFixed(2);
@@ -888,19 +1092,21 @@ export default function Page() {
     });
 
     const csv = [...summaryRows, ...dataRows].join("\r\n");
-    downloadCSV(`Florentina_Inn_Revenue_${monthName}_${year}.csv`, csv);
+    downloadCSV(
+      `Florentina_Inn_Revenue_${periodFileLabel(month, year)}.csv`,
+      csv,
+    );
     toast.success("Revenue report exported to CSV successfully.");
-  }, [revenueData]);
+  }, [revenueData, selectedPeriod, brand.hotelName]);
 
   const handleExportReservationCSV = useCallback(() => {
     if (!reservations || reservations.length === 0) {
-      toast.error("No reservations recorded for this month.");
+      toast.error(`No reservations recorded for ${selectedPeriod}.`);
       return;
     }
-    const monthName = MONTHS[selectedMonth];
     const summaryRows = [
-      `"FLORENTINA INN - RESERVATION LEDGER"`,
-      `"Period","${monthName} ${selectedYear}"`,
+      `"${brand.hotelName.toUpperCase()} - RESERVATION LEDGER"`,
+      `"Period","${selectedPeriod}"`,
       `"Total Reservations",${reservations.length}`,
       `""`,
       `"#","Booking ID","Guest Name","Client Address","Suite Category","Arrival Date","Arrival Time","Booking Status"`,
@@ -911,29 +1117,43 @@ export default function Page() {
       const name = `"${(b.clientName || "Guest").replace(/"/g, '""')}"`;
       const addr = `"${(b.clientAddress || "").replace(/"/g, '""')}"`;
       const cat = `"${(b.room?.category || "Room").replace(/"/g, '""')}"`;
-      const arrDate = b.arrivalDate ? new Date(b.arrivalDate).toLocaleDateString("en-PH") : "";
+      const arrDate = b.arrivalDate
+        ? new Date(b.arrivalDate).toLocaleDateString("en-PH")
+        : "";
       const arrTime = `"${formatTime12hr(b.arrivalTime) || ""}"`;
       const status = `"${b.status || ""}"`;
       return `${i + 1},${id},${name},${addr},${cat},"${arrDate}",${arrTime},${status}`;
     });
 
     const csv = [...summaryRows, ...dataRows].join("\r\n");
-    downloadCSV(`Florentina_Inn_Reservations_${monthName}_${selectedYear}.csv`, csv);
+    downloadCSV(
+      `Florentina_Inn_Reservations_${periodFileLabel(selectedMonth, selectedYear)}.csv`,
+      csv,
+    );
     toast.success("Reservation ledger exported to CSV successfully.");
-  }, [reservations, selectedMonth, selectedYear]);
+  }, [
+    reservations,
+    selectedMonth,
+    selectedYear,
+    selectedPeriod,
+    brand.hotelName,
+  ]);
 
   const handleExportPopularRoomsCSV = useCallback(() => {
-    if (!popularData || !popularData.popularRooms || popularData.popularRooms.length === 0) {
-      toast.error("No popular rooms data available for this month.");
+    if (
+      !popularData ||
+      !popularData.popularRooms ||
+      popularData.popularRooms.length === 0
+    ) {
+      toast.error(`No popular rooms data available for ${selectedPeriod}.`);
       return;
     }
     const { popularRooms, month, year } = popularData;
-    const monthName = MONTHS[month];
     const totalBookings = popularRooms.reduce((sum, r) => sum + r.count, 0);
 
     const summaryRows = [
-      `"FLORENTINA INN - POPULAR SUITES REPORT"`,
-      `"Period","${monthName} ${year}"`,
+      `"${brand.hotelName.toUpperCase()} - POPULAR SUITES REPORT"`,
+      `"Period","${periodLabel(month, year)}"`,
       `"Total Bookings Analyzed",${totalBookings}`,
       `""`,
       `"Rank","Suite Category","Nightly Rate (PHP)","Total Bookings Recorded","Share of Total (%)"`,
@@ -944,14 +1164,20 @@ export default function Page() {
       const cat = `"${(r.category || "").replace(/"/g, '""')}"`;
       const price = Number(r.price || 0).toFixed(2);
       const count = r.count;
-      const share = totalBookings > 0 ? ((r.count / totalBookings) * 100).toFixed(1) : "0.0";
+      const share =
+        totalBookings > 0
+          ? ((r.count / totalBookings) * 100).toFixed(1)
+          : "0.0";
       return `${rank},${cat},${price},${count},"${share}%"`;
     });
 
     const csv = [...summaryRows, ...dataRows].join("\r\n");
-    downloadCSV(`Florentina_Inn_Popular_Suites_${monthName}_${year}.csv`, csv);
+    downloadCSV(
+      `Florentina_Inn_Popular_Suites_${periodFileLabel(month, year)}.csv`,
+      csv,
+    );
     toast.success("Popular rooms report exported to CSV successfully.");
-  }, [popularData]);
+  }, [popularData, selectedPeriod, brand.hotelName]);
 
   // ── Report type config ──
   const reportButtons: {
@@ -1047,20 +1273,27 @@ export default function Page() {
             Financial & Operational Reports
           </h1>
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
-            Generate, preview, and print official audited business reports or export raw CSV ledgers.
+            Generate, preview, and print official audited business reports or
+            export raw CSV ledgers.
           </p>
         </div>
         {/* Month & Year Selectors */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">Select Month:</span>
+          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">
+            Select Month:
+          </span>
           <Select
             value={String(selectedMonth)}
-            onValueChange={(val) => setSelectedMonth(Number(val))}
+            onValueChange={(val) =>
+              setSelectedMonth(val === ALL_MONTHS ? ALL_MONTHS : Number(val))
+            }
           >
             <SelectTrigger className="w-[180px] h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] dark:border-white/10 text-xs font-semibold text-[#130005] dark:text-white">
               <SelectValue placeholder="Select month" />
             </SelectTrigger>
             <SelectContent className="rounded-xl border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13]">
+              {/* Reports the entire selected year instead of one month */}
+              <SelectItem value={ALL_MONTHS}>All Months</SelectItem>
               {MONTHS.map((name, idx) => (
                 <SelectItem key={idx} value={String(idx)}>
                   {name}
@@ -1069,7 +1302,9 @@ export default function Page() {
             </SelectContent>
           </Select>
 
-          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">Select Year:</span>
+          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">
+            Select Year:
+          </span>
           <Select
             value={String(selectedYear)}
             onValueChange={(val) => setSelectedYear(Number(val))}
@@ -1112,7 +1347,7 @@ export default function Page() {
             </div>
             <div className="w-full flex items-center justify-between">
               <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wider">
-                {MONTHS[selectedMonth]} {selectedYear}
+                {selectedPeriod}
               </span>
               <span className="text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                 Generate &rarr;
@@ -1129,10 +1364,14 @@ export default function Page() {
             <FileText className="size-4 text-primary" />
           </div>
           <div>
-            <p className="text-sm font-medium">Official Document & Raw Data Export</p>
+            <p className="text-sm font-medium">
+              Official Document & Raw Data Export
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              All reports are formatted as official business documents suitable for printing,
-              record-keeping, and presentation. Use the <strong>Export CSV</strong> button to download spreadsheet data, or <strong>Download / Print PDF</strong> to save as a document.
+              All reports are formatted as official business documents suitable
+              for printing, record-keeping, and presentation. Use the{" "}
+              <strong>Export CSV</strong> button to download spreadsheet data,
+              or <strong>Download / Print PDF</strong> to save as a document.
             </p>
           </div>
         </div>
@@ -1145,7 +1384,8 @@ export default function Page() {
         open={reportOpen && activeReport === "occupancy"}
         onOpenChange={closeReport}
         title="Occupancy Status Report"
-        onPrint={handlePrint}
+        onPrint={() => handlePrint("Occupancy Status Report")}
+        printing={isPrinting}
         onExportCSV={handleExportOccupancyCSV}
       >
         {roomsLoading ? (
@@ -1155,9 +1395,11 @@ export default function Page() {
             <Skeleton className="h-48 w-full" />
           </div>
         ) : rooms ? (
-          <OccupancyReportContent rooms={rooms} />
+          <OccupancyReportContent rooms={rooms} brand={brand} />
         ) : (
-          <p className="text-center text-muted-foreground py-8">Failed to load occupancy data.</p>
+          <p className="text-center text-muted-foreground py-8">
+            Failed to load occupancy data.
+          </p>
         )}
       </ReportModal>
 
@@ -1165,8 +1407,19 @@ export default function Page() {
       <ReportModal
         open={reportOpen && activeReport === "revenue"}
         onOpenChange={closeReport}
-        title="Monthly Revenue Report"
-        onPrint={handlePrint}
+        title={
+          selectedMonth === ALL_MONTHS
+            ? "Annual Revenue Report"
+            : "Monthly Revenue Report"
+        }
+        onPrint={() =>
+          handlePrint(
+            selectedMonth === ALL_MONTHS
+              ? "Annual Revenue Report"
+              : "Monthly Revenue Report",
+          )
+        }
+        printing={isPrinting}
         onExportCSV={handleExportRevenueCSV}
       >
         {revenueLoading ? (
@@ -1176,9 +1429,11 @@ export default function Page() {
             <Skeleton className="h-48 w-full" />
           </div>
         ) : revenueData ? (
-          <RevenueReportContent data={revenueData} />
+          <RevenueReportContent data={revenueData} brand={brand} />
         ) : (
-          <p className="text-center text-muted-foreground py-8">Failed to load revenue data.</p>
+          <p className="text-center text-muted-foreground py-8">
+            Failed to load revenue data.
+          </p>
         )}
       </ReportModal>
 
@@ -1187,7 +1442,8 @@ export default function Page() {
         open={reportOpen && activeReport === "reservation"}
         onOpenChange={closeReport}
         title="Reservation Report"
-        onPrint={handlePrint}
+        onPrint={() => handlePrint("Reservation Report")}
+        printing={isPrinting}
         onExportCSV={handleExportReservationCSV}
       >
         {reservationLoading ? (
@@ -1201,9 +1457,12 @@ export default function Page() {
             bookings={reservations}
             month={selectedMonth}
             year={selectedYear}
+            brand={brand}
           />
         ) : (
-          <p className="text-center text-muted-foreground py-8">Failed to load reservation data.</p>
+          <p className="text-center text-muted-foreground py-8">
+            Failed to load reservation data.
+          </p>
         )}
       </ReportModal>
 
@@ -1212,7 +1471,8 @@ export default function Page() {
         open={reportOpen && activeReport === "popular"}
         onOpenChange={closeReport}
         title="Popular Room Report"
-        onPrint={handlePrint}
+        onPrint={() => handlePrint("Popular Room Report")}
+        printing={isPrinting}
         onExportCSV={handleExportPopularRoomsCSV}
       >
         {popularLoading ? (
@@ -1222,9 +1482,11 @@ export default function Page() {
             <Skeleton className="h-48 w-full" />
           </div>
         ) : popularData ? (
-          <PopularRoomReportContent data={popularData} />
+          <PopularRoomReportContent data={popularData} brand={brand} />
         ) : (
-          <p className="text-center text-muted-foreground py-8">Failed to load popular room data.</p>
+          <p className="text-center text-muted-foreground py-8">
+            Failed to load popular room data.
+          </p>
         )}
       </ReportModal>
     </div>

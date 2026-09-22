@@ -122,7 +122,7 @@ export default function Page() {
                           {room.roomNumber ? `Room ${room.roomNumber} · ` : ""}{room.category}
                         </p>
                         <p className="text-xs font-semibold text-[#900546] dark:text-[#F968AC] mt-0.5">
-                          ₱{room.price.toLocaleString()}/night
+                          ₱{room.price.toLocaleString()}/day
                         </p>
                       </div>
                     </div>

@@ -23,9 +23,8 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { needsReply, getChatStatus, ChatStatusType } from "@/app/utils/customFunction";
+import { getChatStatus, ChatStatusType } from "@/app/utils/customFunction";
 import { successAlert, errorAlert, confirmAlert } from "@/app/utils/alert";
-import { playMessageChime } from "@/app/utils/sound";
 
 function getInitials(name: string): string {
   if (!name) return "??";
@@ -192,8 +191,6 @@ export default function StaffChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const prevUnreadRef = useRef<number>(0);
-  const isFirstLoadRef = useRef<boolean>(true);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -214,18 +211,6 @@ export default function StaffChatPage() {
         const res = await axiosInstance.get("/system/chat");
         const list: chatInterface[] = res.data || [];
         setChats(list);
-
-        // Sound alert if unread count increases
-        const unreadTotal = list.filter((c) => needsReply(c.convo, c.status)).length;
-        if (isFirstLoadRef.current) {
-          prevUnreadRef.current = unreadTotal;
-          isFirstLoadRef.current = false;
-        } else if (unreadTotal > prevUnreadRef.current) {
-          playMessageChime();
-          prevUnreadRef.current = unreadTotal;
-        } else {
-          prevUnreadRef.current = unreadTotal;
-        }
       } catch {
         // Silently fail on background poll
       } finally {
@@ -446,11 +431,15 @@ export default function StaffChatPage() {
   }, [selectedChatObj, selectedStatus, selectedConvo]);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] w-full bg-background overflow-hidden border-t border-border">
+    <div className="flex h-[calc(100dvh-4rem)] w-full min-w-0 bg-background overflow-hidden border-t border-border">
       {/* ── Left Panel: Chat Inbox & Filters ── */}
-      <div className="w-[360px] xl:w-[400px] shrink-0 border-r border-border bg-card flex flex-col h-full">
+      <div
+        className={`w-full lg:w-[360px] xl:w-[400px] min-w-0 shrink-0 border-r border-border bg-card flex-col h-full ${
+          selectedChatId ? "hidden lg:flex" : "flex"
+        }`}
+      >
         {/* Header & Inbox Title */}
-        <div className="border-b border-border p-4 space-y-3">
+        <div className="border-b border-border p-3 sm:p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -671,7 +660,11 @@ export default function StaffChatPage() {
       </div>
 
       {/* ── Right Panel: Active Conversation View ── */}
-      <div className="flex-1 flex flex-col bg-muted/10 h-full">
+      <div
+        className={`flex-1 min-w-0 flex-col bg-muted/10 h-full ${
+          selectedChatId ? "flex" : "hidden lg:flex"
+        }`}
+      >
         {!selectedChatId ? (
           /* No chat selected empty state */
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground px-6 text-center">
@@ -686,46 +679,47 @@ export default function StaffChatPage() {
         ) : (
           <>
             {/* Conversation Header */}
-            <div className="border-b border-border px-6 py-3.5 flex items-center justify-between bg-card shrink-0">
-              <div className="flex items-center gap-3">
+            <div className="border-b border-border px-3 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-2 bg-card shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                 <button
                   onClick={() => setSelectedChatId(null)}
-                  className="flex size-8 items-center justify-center rounded-lg hover:bg-muted transition-colors cursor-pointer lg:hidden"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-muted transition-colors cursor-pointer lg:hidden"
+                  aria-label="Back to conversations"
                 >
                   <ChevronLeft className="size-4 text-muted-foreground" />
                 </button>
 
                 <div
-                  className={`flex size-10 items-center justify-center rounded-full text-xs font-bold border ${getAvatarColor(
+                  className={`flex size-10 shrink-0 items-center justify-center rounded-full text-xs font-bold border ${getAvatarColor(
                     selectedName
                   )}`}
                 >
                   {getInitials(selectedName)}
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold text-foreground truncate">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-0.5">
+                    <h2 className="text-sm font-bold text-foreground truncate min-w-0 max-w-full">
                       {selectedName}
                     </h2>
 
                     {/* Header Status Badge */}
                     {selectedComputedStatus === "needs_reply" && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                         <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
                         Needs Reply
                       </span>
                     )}
 
                     {selectedComputedStatus === "active" && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                         <span className="size-1.5 rounded-full bg-emerald-500" />
                         Active
                       </span>
                     )}
 
                     {selectedComputedStatus === "resolved" && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
                         <CheckCircle2 className="size-3 text-muted-foreground" />
                         Resolved
                       </span>
@@ -740,25 +734,27 @@ export default function StaffChatPage() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <Button
                   variant={selectedStatus === "resolved" ? "outline" : "default"}
                   size="sm"
                   onClick={handleToggleStatus}
                   disabled={updatingStatus}
-                  className="gap-1.5 text-xs h-8.5 font-medium"
+                  className="gap-1.5 text-xs h-8.5 px-2.5 sm:px-3 font-medium"
+                  title={selectedStatus === "resolved" ? "Reopen Chat" : "Mark as Resolved"}
+                  aria-label={selectedStatus === "resolved" ? "Reopen Chat" : "Mark as Resolved"}
                 >
                   {updatingStatus ? (
                     <Loader2 className="size-3.5 animate-spin" />
                   ) : selectedStatus === "resolved" ? (
                     <>
                       <RotateCcw className="size-3.5 text-amber-500" />
-                      <span>Reopen Chat</span>
+                      <span className="hidden sm:inline">Reopen Chat</span>
                     </>
                   ) : (
                     <>
                       <CheckCircle2 className="size-3.5" />
-                      <span>Mark as Resolved</span>
+                      <span className="hidden sm:inline">Mark as Resolved</span>
                     </>
                   )}
                 </Button>
@@ -769,6 +765,7 @@ export default function StaffChatPage() {
                   onClick={handleDeleteChat}
                   className="size-8.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                   title="Delete conversation"
+                  aria-label="Delete conversation"
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -777,8 +774,8 @@ export default function StaffChatPage() {
 
             {/* Resolved Banner */}
             {selectedStatus === "resolved" && (
-              <div className="bg-muted/60 border-b border-border px-6 py-2 flex items-center justify-between text-xs text-muted-foreground">
-                <div className="flex items-center gap-2">
+              <div className="bg-muted/60 border-b border-border px-3 sm:px-6 py-2 flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-start sm:items-center gap-2 min-w-0">
                   <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
                   <span>
                     This conversation is marked as <strong>Resolved</strong>. Sending a new message will automatically reopen it.
@@ -788,7 +785,7 @@ export default function StaffChatPage() {
             )}
 
             {/* Message Thread */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-muted/20">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 space-y-3 bg-muted/20">
               {selectedConvo.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-center py-12">
                   <div className="size-12 rounded-full bg-card border border-border flex items-center justify-center mb-3">
@@ -812,30 +809,30 @@ export default function StaffChatPage() {
                       }`}
                     >
                       <div
-                        className={`flex gap-2 max-w-[78%] ${
+                        className={`flex gap-2 min-w-0 max-w-[88%] sm:max-w-[78%] ${
                           isStaff ? "flex-row-reverse" : "flex-row"
                         }`}
                       >
                         {/* Bubble */}
                         <div
-                          className={`rounded-2xl px-4 py-2.5 text-xs leading-relaxed shadow-xs ${
+                          className={`min-w-0 rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 text-xs leading-relaxed shadow-xs ${
                             isStaff
                               ? "bg-primary text-primary-foreground rounded-tr-xs"
                               : "bg-card text-card-foreground border border-border rounded-tl-xs"
                           }`}
                         >
-                          <p className="whitespace-pre-wrap break-words">{msg.message}</p>
+                          <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.message}</p>
                         </div>
                       </div>
 
                       {/* Timestamp & Delivery / Seen Checkmark under bubble */}
                       {timeFormatted && (
                         <div
-                          className={`flex items-center gap-1 mt-1 px-1.5 text-[10px] text-muted-foreground ${
+                          className={`flex items-center gap-1 mt-1 px-1.5 max-w-full min-w-0 text-[10px] text-muted-foreground ${
                             isStaff ? "justify-end" : "justify-start"
                           }`}
                         >
-                          <span>
+                          <span className="truncate">
                             {isStaff ? "You · " : `${selectedName} · `}
                             {timeFormatted}
                           </span>
@@ -878,7 +875,7 @@ export default function StaffChatPage() {
             </div>
 
             {/* Input Bar & AI Co-Pilot / Quick Replies */}
-            <div className="border-t border-border p-3.5 bg-card shrink-0 space-y-2.5">
+            <div className="border-t border-border p-2.5 sm:p-3.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] bg-card shrink-0 space-y-2.5">
               {/* Quick Actions Bar: AI Suggest Reply & Canned Response Chips */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar max-w-4xl mx-auto">
                 {/* AI Suggest Reply Button */}
@@ -929,7 +926,7 @@ export default function StaffChatPage() {
                   e.preventDefault();
                   handleSend();
                 }}
-                className="flex items-center gap-2.5 max-w-4xl mx-auto"
+                className="flex items-center gap-2 sm:gap-2.5 max-w-4xl mx-auto min-w-0"
               >
                 <Input
                   ref={inputRef}
@@ -938,19 +935,20 @@ export default function StaffChatPage() {
                   onKeyDown={handleKeyDown}
                   placeholder={`Reply to ${selectedName}... (or click AI Suggest Reply)`}
                   disabled={sending || generatingReply}
-                  className="flex-1 h-10 bg-muted/40 border-border focus:bg-background rounded-xl text-xs"
+                  className="flex-1 min-w-0 h-10 bg-muted/40 border-border focus:bg-background rounded-xl text-base sm:text-xs"
                 />
                 <Button
                   type="submit"
                   size="sm"
                   disabled={!input.trim() || sending || generatingReply}
-                  className="shrink-0 h-10 px-4 rounded-xl gap-1.5 text-xs font-semibold"
+                  className="shrink-0 h-10 px-3 sm:px-4 rounded-xl gap-1.5 text-xs font-semibold"
+                  aria-label="Send message"
                 >
                   {sending ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <>
-                      <span>Send</span>
+                      <span className="hidden sm:inline">Send</span>
                       <Send className="size-3.5" />
                     </>
                   )}

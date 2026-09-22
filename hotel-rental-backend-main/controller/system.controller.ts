@@ -357,7 +357,7 @@ export class SystemController {
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
 
      
@@ -396,7 +396,7 @@ export class SystemController {
       const rooms = await RoomService.getAll();
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
       const roomSummary = rooms && rooms.length > 0
         ? rooms.map((r) => `${r.roomNumber ? `Room ${r.roomNumber} (` : ""}${r.category}${r.roomNumber ? ")" : ""}: ₱${r.price.toLocaleString()}/night (Status: ${r.status})`).join(", ")
@@ -617,7 +617,7 @@ Return ONLY the suggested reply message text without any quotes, conversational 
       const { forecastData, baseline, peakMonths, slowMonths, totalForecast, projectedOccupancy } = request.body;
 
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
       const prompt = `
 You are a senior hotel revenue management and hospitality operations consultant.
@@ -810,6 +810,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
   static getStaffNotifications = async (request: AuthRequest, response: Response) => {
     try {
       await SystemController.generateArrivalReminders();
+      await SystemController.generateGracePeriodReminders();
       await SystemController.generateOverdueReminders();
 
       const permissions = request.account?.permisions || [];
@@ -966,6 +967,8 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
         }
         seen.add(guestKey);
 
+        if (!(await BookingService.claimArrivalNotification(bookingId))) continue;
+
         await notify({
           type: "reservation",
           title: "Arrival Today",
@@ -977,8 +980,6 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
           audience: "staff",
           permission: "frontdesk management",
         });
-
-        await BookingService.markArrivalNotified(bookingId);
       }
     } catch (error) {
       console.log("Failed to generate arrival reminders: " + (error as Error).message);
@@ -1015,6 +1016,8 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
         }
         seen.add(guestKey);
 
+        if (!(await BookingService.claimOverdueNotification(bookingId))) continue;
+
         await notify({
           type: "reservation",
           title: "Overdue Arrival",
@@ -1026,11 +1029,58 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
           audience: "staff",
           permission: "frontdesk management",
         });
-
-        await BookingService.markOverdueNotified(bookingId);
       }
     } catch (error) {
       console.log("Failed to generate overdue reminders: " + (error as Error).message);
+    }
+  };
+
+  // Raises ONE alert per booking when today's arrival time has passed and the
+  // guest is now inside the grace window (mirrors the reservation page timer).
+  private static generateGracePeriodReminders = async () => {
+    try {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+
+      const system = await SystemService.get();
+      const graceHours = system?.gracePeriodHours ?? 2;
+
+      const bookings = await BookingService.getTodayGraceCandidates(todayStr);
+
+      for (const booking of bookings) {
+        const [hours, minutes] = (booking.arrivalTime || "14:00").split(":").map(Number);
+        const arrivalMs = new Date(booking.arrivalDate).setHours(hours || 14, minutes || 0, 0, 0);
+        const deadlineMs = arrivalMs + graceHours * 60 * 60 * 1000;
+        const nowMs = now.getTime();
+
+        if (nowMs < arrivalMs || nowMs >= deadlineMs) continue;
+
+        const bookingId = String(booking._id);
+        const existing = await NotificationService.existsByDedupeKey(bookingId, "reservation", "Grace Period");
+        if (existing) {
+          await BookingService.markGraceNotified(bookingId);
+          continue;
+        }
+
+        if (!(await BookingService.claimGraceNotification(bookingId))) continue;
+
+        await notify({
+          type: "reservation",
+          title: "Grace Period",
+          message: `${booking.clientName}${booking.clientPhone ? ` (${booking.clientPhone})` : ""} has passed the arrival time of ${booking.arrivalTime} and is now within the ${graceHours}-hour grace period.`,
+          severity: "warning",
+          link: "/pages/staff/reservation",
+          targetType: "booking",
+          targetId: bookingId,
+          audience: "staff",
+          permission: "frontdesk management",
+        });
+      }
+    } catch (error) {
+      console.log("Failed to generate grace period reminders: " + (error as Error).message);
     }
   };
 }

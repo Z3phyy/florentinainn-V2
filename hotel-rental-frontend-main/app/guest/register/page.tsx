@@ -16,13 +16,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2, ShieldAlert, Eye, EyeOff } from "lucide-react";
 import { validatePassword, validateEmail } from "@/app/utils/validation";
 import { checkEmailAvailability } from "@/app/utils/customFunction";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
+import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 export default function Page() {
   const router = useRouter();
+  const { showPassword, togglePasswordVisibility, passwordInputType } =
+    usePasswordVisibility();
   const [type, setType] = useState("admin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -98,7 +101,9 @@ export default function Page() {
 
     const availability = await checkEmailAvailability(email);
     if (!availability.available) {
-      errorAlert("Email already exists. Registration is blocked — please use a different email address.");
+      errorAlert(
+        "Email already exists. Registration is blocked — please use a different email address.",
+      );
       return;
     }
 
@@ -110,7 +115,9 @@ export default function Page() {
       <main className="flex-1 flex items-center justify-center px-6">
         <div className="w-full max-w-sm space-y-6">
           <div className="text-center space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Create Admin Account</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Create Admin Account
+            </h1>
             <p className="text-sm text-muted-foreground">
               Register an administrator account. Only one admin and one super
               admin account are allowed.
@@ -124,11 +131,18 @@ export default function Page() {
           ) : adminStatus?.canRegister === false ? (
             <div className="p-4 rounded-lg border border-amber-500/20 bg-amber-500/10 text-center space-y-2">
               <ShieldAlert className="size-6 text-amber-500 mx-auto" />
-              <p className="text-sm font-semibold text-foreground">Registration Closed</p>
+              <p className="text-sm font-semibold text-foreground">
+                Registration Closed
+              </p>
               <p className="text-xs text-muted-foreground">
                 Both the Admin and Super Admin accounts are already registered.
               </p>
-              <Button onClick={() => router.push("/guest/login")} variant="outline" size="sm" className="mt-2">
+              <Button
+                onClick={() => router.push("/guest/login")}
+                variant="outline"
+                size="sm"
+                className="mt-2"
+              >
                 Return to Login
               </Button>
             </div>
@@ -141,8 +155,12 @@ export default function Page() {
                     <SelectValue placeholder="Select account type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {!adminStatus?.hasAdmin && <SelectItem value="admin">Admin</SelectItem>}
-                    {!adminStatus?.hasSuperAdmin && <SelectItem value="super admin">Super Admin</SelectItem>}
+                    {!adminStatus?.hasAdmin && (
+                      <SelectItem value="admin">Admin</SelectItem>
+                    )}
+                    {!adminStatus?.hasSuperAdmin && (
+                      <SelectItem value="super admin">Super Admin</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -161,31 +179,75 @@ export default function Page() {
 
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
+
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={passwordInputType}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="pr-10"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={togglePasswordVisibility}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    aria-pressed={showPassword}
+                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {password && <PasswordRequirements password={password} />}
 
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                />
+
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    type={passwordInputType}
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    className="pr-10"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={togglePasswordVisibility}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    aria-pressed={showPassword}
+                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
-              <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={registerMutation.isPending}
+              >
                 {registerMutation.isPending ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />

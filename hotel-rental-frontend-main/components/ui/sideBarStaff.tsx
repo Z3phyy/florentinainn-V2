@@ -16,8 +16,8 @@ import {
   ExternalLink,
   UserRound,
 } from "lucide-react";
-import { useState, useMemo, useEffect, useRef } from "react";
-import { playMessageChime } from "@/app/utils/sound";
+import { useState, useMemo } from "react";
+import useStaffNotificationSound from "@/app/hooks/useStaffNotificationSound";
 import {
   Sidebar,
   SidebarContent,
@@ -96,7 +96,7 @@ export function StaffSidebar({ className }: AppSidebarProps) {
   const { user } = useUserStore();
 
   const visibleNavigationItems = navigationItems.filter(
-    (item) => !item.permision || user?.permisions?.includes(item.permision)
+    (item) => !item.permision || user?.permisions?.includes(item.permision),
   );
 
   const { data: systemInfo } = useQuery<systemInterface>({
@@ -121,21 +121,7 @@ export function StaffSidebar({ className }: AppSidebarProps) {
     return chats.filter((c) => needsReply(c.convo, c.status)).length;
   }, [chats]);
 
-  const prevUnreadRef = useRef<number>(0);
-  const isFirstLoadRef = useRef<boolean>(true);
-
-  useEffect(() => {
-    if (isFirstLoadRef.current) {
-      prevUnreadRef.current = unreadCount;
-      isFirstLoadRef.current = false;
-      return;
-    }
-
-    if (unreadCount > prevUnreadRef.current) {
-      playMessageChime();
-    }
-    prevUnreadRef.current = unreadCount;
-  }, [unreadCount]);
+  useStaffNotificationSound(!!user);
 
   const logoutHandler = async () => {
     queryClient.clear();
@@ -239,7 +225,9 @@ export function StaffSidebar({ className }: AppSidebarProps) {
       )}
 
       {/* ── Desktop Sidebar ── */}
-      <Sidebar className={`hidden lg:flex bg-white dark:bg-[#130005] border-r border-[#D9C3C3] dark:border-white/10 ${className}`}>
+      <Sidebar
+        className={`hidden lg:flex bg-white dark:bg-[#130005] border-r border-[#D9C3C3] dark:border-white/10 ${className}`}
+      >
         {/* Header */}
         <SidebarHeader className="bg-white dark:bg-[#130005] border-b border-[#D9C3C3] dark:border-white/10 p-5">
           <Link href="/" className="flex items-center gap-3 group min-w-0">
@@ -249,7 +237,8 @@ export function StaffSidebar({ className }: AppSidebarProps) {
                 alt="Logo"
                 className="size-full object-contain"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                  (e.target as HTMLImageElement).src =
+                    "/Florentina Inn Logo.png";
                 }}
               />
             </div>
@@ -284,7 +273,10 @@ export function StaffSidebar({ className }: AppSidebarProps) {
                             : "text-[#5C454B] dark:text-gray-300 hover:bg-[#FAF5F5] dark:hover:bg-[#1A0E13] hover:text-[#130005]"
                         }`}
                       >
-                        <Link href={item.url} className="flex items-center justify-between w-full">
+                        <Link
+                          href={item.url}
+                          className="flex items-center justify-between w-full"
+                        >
                           <div className="flex items-center gap-3">
                             <item.icon className="size-4 shrink-0" />
                             <span>{item.title}</span>

@@ -35,11 +35,15 @@ export interface bookingInterfaceInput {
     totalAmount?: number,
     type: string,
     status: string,
+    guests?: number,
+    nonRefundable?: boolean,
+    policyAcceptedAt?: Date | null,
     arrivalDate: string,
     departureDate?: string,
     arrivalTime: string,
     arrivalNotified?: boolean,
     overdueNotified?: boolean,
+    graceNotified?: boolean,
     room : string
 }
 
@@ -54,10 +58,14 @@ export interface bookingInterface  {
     totalAmount?: number,
     type: string,
     status: string,
+    guests?: number,
+    nonRefundable?: boolean,
+    policyAcceptedAt?: Date | null,
     arrivalDate: string,
     departureDate?: string,
     arrivalTime: string,
     arrivalNotified?: boolean,
     overdueNotified?: boolean,
+    graceNotified?: boolean,
     room : roomInterface,
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -10,23 +10,133 @@ import { errorAlert, successAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Lock, Timer } from "lucide-react";
+import { Loader2, Lock, Timer, Eye, EyeOff } from "lucide-react";
+import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 // ── Lockout Configuration ──
-// Change this value to adjust the base lockout duration (in seconds).
-// After every 3 consecutive failed attempts, the lockout time = BASE_LOCKOUT_DELAY * multiplier
-// where multiplier = 1 (first 3 fails), 2 (next 3), 3 (next 3), and so on.
-const BASE_LOCKOUT_DELAY = 10; // seconds
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_STORAGE_KEY = "login_lockout";
+const LEGACY_LOCKOUT_KEYS = ["login_consecutive_fails", "login_lockout_until"];
+
+interface StoredLockout {
+  email: string;
+  until: number;
+}
+
+function parseLockout(raw: string | null): StoredLockout | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredLockout>;
+    if (typeof parsed?.until !== "number" || !Number.isFinite(parsed.until))
+      return null;
+    return {
+      email: String(parsed.email || "").toLowerCase(),
+      until: parsed.until,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const lockoutListeners = new Set<() => void>();
+
+function emitLockoutChange() {
+  lockoutListeners.forEach((listener) => listener());
+}
+
+function subscribeLockout(listener: () => void) {
+  lockoutListeners.add(listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    lockoutListeners.delete(listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
+function getLockoutSnapshot(): string {
+  try {
+    return localStorage.getItem(LOCKOUT_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function getLockoutServerSnapshot(): string {
+  return "";
+}
+
+function writeStoredLockout(value: StoredLockout) {
+  try {
+    localStorage.setItem(LOCKOUT_STORAGE_KEY, JSON.stringify(value));
+  } catch {}
+  emitLockoutChange();
+}
+
+function clearStoredLockout() {
+  try {
+    localStorage.removeItem(LOCKOUT_STORAGE_KEY);
+    LEGACY_LOCKOUT_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch {}
+  emitLockoutChange();
+}
+
+function subscribeClock(listener: () => void) {
+  const id = setInterval(listener, 1000);
+  return () => clearInterval(id);
+}
+
+function getClockSnapshot(): number {
+  return Math.floor(Date.now() / 1000) * 1000;
+}
+
+function getClockServerSnapshot(): number {
+  return 0;
+}
+
+interface LoginErrorBody {
+  message?: string;
+  locked?: boolean;
+  lockedUntil?: string | null;
+  retryAfterSeconds?: number;
+  remainingAttempts?: number;
+}
+
+function parseLoginError(error: unknown): {
+  message: string;
+  body: LoginErrorBody;
+  status?: number;
+} {
+  const response = (error as { response?: { data?: unknown; status?: number } })
+    ?.response;
+  const data = response?.data;
+
+  if (typeof data === "string") {
+    return { message: data, body: {}, status: response?.status };
+  }
+  if (data && typeof data === "object") {
+    const body = data as LoginErrorBody;
+    return {
+      message: body.message || "Unable to sign in. Please try again.",
+      body,
+      status: response?.status,
+    };
+  }
+  return {
+    message: "Unable to sign in. Please try again.",
+    body: {},
+    status: response?.status,
+  };
+}
 
 export default function Page() {
   const router = useRouter();
   const { setUser } = useUserStore();
+  const { showPassword, togglePasswordVisibility, passwordInputType } =
+    usePasswordVisibility();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [consecutiveFails, setConsecutiveFails] = useState(0);
-  const [lockoutRemaining, setLockoutRemaining] = useState(0);
+  const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null);
   const [showAdminLink, setShowAdminLink] = useState(false);
-  const failsRef = useRef(0);
 
   // ── Query whether Admin / Super Admin accounts can still be registered ──
   const { data: adminStatus } = useQuery<{
@@ -46,7 +156,9 @@ export default function Page() {
       if (e.key === "Enter" && e.altKey) {
         if (adminStatus?.canRegister === false) {
           setShowAdminLink(false);
-          errorAlert("Both Admin and Super Admin accounts are already registered.");
+          errorAlert(
+            "Both Admin and Super Admin accounts are already registered.",
+          );
         } else {
           setShowAdminLink((prev) => !prev);
         }
@@ -56,71 +168,47 @@ export default function Page() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [adminStatus]);
 
-  // ── Restore lockout state from localStorage on mount ──
-  useEffect(() => {
-    const storedFails = localStorage.getItem("login_consecutive_fails");
-    if (storedFails) {
-      const n = Number(storedFails);
-      failsRef.current = n;
-      setConsecutiveFails(n);
-    }
+  const rawLockout = useSyncExternalStore(
+    subscribeLockout,
+    getLockoutSnapshot,
+    getLockoutServerSnapshot,
+  );
+  const nowMs = useSyncExternalStore(
+    subscribeClock,
+    getClockSnapshot,
+    getClockServerSnapshot,
+  );
 
-    const lockoutUntil = localStorage.getItem("login_lockout_until");
-    if (lockoutUntil) {
-      const remaining = Math.max(0, Math.ceil((Number(lockoutUntil) - Date.now()) / 1000));
-      if (remaining > 0) {
-        setLockoutRemaining(remaining);
-      } else {
-        localStorage.removeItem("login_lockout_until");
-      }
-    }
-  }, []);
+  const lockout = useMemo(() => parseLockout(rawLockout), [rawLockout]);
 
-  // ── Countdown ticker ──
-  useEffect(() => {
-    if (lockoutRemaining <= 0) return;
+  const lockoutRemaining =
+    lockout && nowMs
+      ? Math.max(0, Math.ceil((lockout.until - nowMs) / 1000))
+      : 0;
 
-    const id = setInterval(() => {
-      setLockoutRemaining((prev) => {
-        const next = prev - 1;
-        if (next <= 0) {
-          clearInterval(id);
-          localStorage.removeItem("login_lockout_until");
-          return 0;
-        }
-        return next;
-      });
-    }, 1000);
+  const typedEmail = email.trim().toLowerCase();
 
-    return () => clearInterval(id);
-  }, [lockoutRemaining]);
+  const isLocked =
+    lockoutRemaining > 0 &&
+    (!typedEmail || !lockout?.email || typedEmail === lockout.email);
 
-  // ── Persist lockout ──
-  const applyLockout = (totalFails: number) => {
-    // Lockout activates at every 3-fail boundary: 3, 6, 9, ...
-    if (totalFails >= 3 && totalFails % 3 === 0) {
-      const multiplier = Math.floor(totalFails / 3);
-      const lockoutSeconds = BASE_LOCKOUT_DELAY * multiplier;
-      const lockoutUntil = Date.now() + lockoutSeconds * 1000;
-      localStorage.setItem("login_lockout_until", String(lockoutUntil));
-      setLockoutRemaining(lockoutSeconds);
-    }
+  const applyServerLockout = (body: LoginErrorBody, attemptedEmail: string) => {
+    const until = body.lockedUntil
+      ? new Date(body.lockedUntil).getTime()
+      : body.retryAfterSeconds
+        ? Date.now() + body.retryAfterSeconds * 1000
+        : 0;
+
+    if (!until || Number.isNaN(until) || until <= Date.now()) return false;
+
+    writeStoredLockout({ email: attemptedEmail.trim().toLowerCase(), until });
+    setAttemptsLeft(0);
+    return true;
   };
 
-  const resetFails = () => {
-    failsRef.current = 0;
-    setConsecutiveFails(0);
-    localStorage.removeItem("login_consecutive_fails");
-    localStorage.removeItem("login_lockout_until");
-    setLockoutRemaining(0);
-  };
-
-  const incrementFails = () => {
-    const newFails = failsRef.current + 1;
-    failsRef.current = newFails;
-    setConsecutiveFails(newFails);
-    localStorage.setItem("login_consecutive_fails", String(newFails));
-    applyLockout(newFails);
+  const resetLockout = () => {
+    clearStoredLockout();
+    setAttemptsLeft(null);
   };
 
   // ── Login mutation ──
@@ -128,14 +216,16 @@ export default function Page() {
     mutationFn: (data: { email: string; password: string }) =>
       axiosInstance.post("/account/login", data),
     onSuccess: (response) => {
-      resetFails();
+      // A successful sign-in clears the local mirror; the server clears the
+      // authoritative counter at the same time.
+      resetLockout();
 
       const { token, account, role } = response.data;
       if (token) {
         localStorage.setItem("token", token);
       }
 
-      switch(role){
+      switch (role) {
         case "employee":
           setUser({
             ...account,
@@ -143,7 +233,7 @@ export default function Page() {
             type: "employee",
           });
           router.push("/pages/staff/home");
-        break;
+          break;
 
         case "admin":
           setUser({
@@ -157,7 +247,7 @@ export default function Page() {
             isApproved: true,
           });
           router.push("/pages/admin/dashboard");
-        break;
+          break;
 
         case "super admin":
           setUser({
@@ -171,45 +261,41 @@ export default function Page() {
             isApproved: true,
           });
           router.push("/pages/admin/dashboard");
-        break;
+          break;
       }
     },
-   onError: (err: { response?: { data?: string } }) => {
-    console.log(err)
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to create admin account. Please try again.";
+    onError: (err: unknown, variables) => {
+      const { message, body } = parseLoginError(err);
+
+      // The server reports the lockout deadline; the client only displays it.
+      const nowLocked = applyServerLockout(body, variables.email);
+
+      if (!nowLocked && typeof body.remainingAttempts === "number") {
+        setAttemptsLeft(body.remainingAttempts);
+      }
+
       errorAlert(message);
-      incrementFails();
     },
   });
-
-   
 
   // ── Submit handler ──
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (lockoutRemaining > 0) return;
+    if (isLocked || loginMutation.isPending) return;
 
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       errorAlert("Please fill in all fields.");
       return;
     }
 
-
-
-
-    loginMutation.mutate({ email, password });
+    loginMutation.mutate({ email: email.trim(), password });
   };
 
   // ── Format countdown ──
   const minutes = Math.floor(lockoutRemaining / 60);
   const seconds = lockoutRemaining % 60;
-  const countdownText = minutes > 0
-    ? `${minutes}m ${seconds}s`
-    : `${seconds}s`;
+  const countdownText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -233,33 +319,60 @@ export default function Page() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                disabled={lockoutRemaining > 0}
+                disabled={isLocked}
               />
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={lockoutRemaining > 0}
-              />
+
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={passwordInputType}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={isLocked}
+                  className="pr-10"
+                />
+
+                <button
+                  type="button"
+                  onClick={togglePasswordVisibility}
+                  disabled={isLocked}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
+            {/* ── Remaining attempts hint (from the server) ── */}
+            {!isLocked && attemptsLeft !== null && attemptsLeft > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {attemptsLeft} of {MAX_ATTEMPTS} sign-in attempt
+                {attemptsLeft === 1 ? "" : "s"} remaining before this account is
+                locked for 5 minutes.
+              </p>
+            )}
+
             {/* ── Lockout Banner ── */}
-            {lockoutRemaining > 0 && (
+            {isLocked && (
               <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/30 px-3.5 py-2.5 text-sm">
                 <Lock className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-amber-800 dark:text-amber-300 text-xs leading-tight">
-                    Too many failed attempts
+                    Too many failed attempts ({MAX_ATTEMPTS} maximum)
                   </p>
                   <p className="text-amber-600 dark:text-amber-400 text-xs mt-0.5">
-                    Try again in{" "}
+                    Sign-in is locked by the server. Try again in{" "}
                     <span className="font-semibold tabular-nums inline-flex items-center gap-1">
                       <Timer className="size-3" />
                       {countdownText}
@@ -272,9 +385,9 @@ export default function Page() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loginMutation.isPending || lockoutRemaining > 0}
+              disabled={loginMutation.isPending || isLocked}
             >
-              {lockoutRemaining > 0 ? (
+              {isLocked ? (
                 <>
                   <Timer className="size-4 animate-pulse" />
                   Locked — {countdownText}

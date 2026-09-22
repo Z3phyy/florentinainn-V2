@@ -16,12 +16,18 @@ import {
   UserRound,
   AtSign,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { validatePassword, validateEmail } from "@/app/utils/validation";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
+import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 export default function Page() {
   const { user, setUser } = useUserStore();
+  const currentPasswordVisibility = usePasswordVisibility();
+  const newPasswordVisibility = usePasswordVisibility();
+  const confirmPasswordVisibility = usePasswordVisibility();
 
   // ── Update Email form state ──
   const [currentPassword, setCurrentPassword] = useState("");
@@ -33,8 +39,11 @@ export default function Page() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const updateEmailMutation = useMutation({
-    mutationFn: (data: { oldEmail: string; oldPassword: string; newEmail: string }) =>
-      axiosInstance.put("/account/change-credentials", data),
+    mutationFn: (data: {
+      oldEmail: string;
+      oldPassword: string;
+      newEmail: string;
+    }) => axiosInstance.put("/account/change-credentials", data),
     onSuccess: (response) => {
       successAlert("Email updated successfully.");
       if (response.data?.account?.email && user) {
@@ -56,8 +65,11 @@ export default function Page() {
   });
 
   const changePasswordMutation = useMutation({
-    mutationFn: (data: { oldEmail: string; oldPassword: string; newPassword: string }) =>
-      axiosInstance.put("/account/change-credentials", data),
+    mutationFn: (data: {
+      oldEmail: string;
+      oldPassword: string;
+      newPassword: string;
+    }) => axiosInstance.put("/account/change-credentials", data),
     onSuccess: () => {
       successAlert("Password updated successfully.");
       setCurrentPasswordForPass("");
@@ -155,7 +167,8 @@ export default function Page() {
           My Profile
         </h1>
         <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">
-          View your staff details and manage your login email and password securely.
+          View your staff details and manage your login email and password
+          securely.
         </p>
       </div>
 
@@ -175,7 +188,9 @@ export default function Page() {
                 {roleTitle}
               </span>
             </div>
-            <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">{user?.email}</p>
+            <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">
+              {user?.email}
+            </p>
           </div>
         </div>
 
@@ -250,18 +265,37 @@ export default function Page() {
                 required
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="staff-profile-verify-pass" className="text-xs">
+            <div className="relative">
+              <Label htmlFor="profile-current-pass" className="text-xs">
                 Current Password
               </Label>
+
               <Input
-                id="staff-profile-verify-pass"
-                type="password"
-                placeholder="Enter your current password to verify"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
+                id="profile-current-pass"
+                type={currentPasswordVisibility.passwordInputType}
+                placeholder="Enter your current password"
+                value={currentPasswordForPass}
+                onChange={(e) => setCurrentPasswordForPass(e.target.value)}
                 required
+                className="pr-10"
               />
+
+              <button
+                type="button"
+                onClick={currentPasswordVisibility.togglePasswordVisibility}
+                aria-label={
+                  currentPasswordVisibility.showPassword
+                    ? "Hide password"
+                    : "Show password"
+                }
+                className="absolute right-0 -bottom-1 flex h-10 w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {currentPasswordVisibility.showPassword ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+              </button>
             </div>
           </div>
 
@@ -300,48 +334,102 @@ export default function Page() {
 
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <div className="rounded-xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="staff-profile-current-pass" className="text-xs">
+            <div className="relative">
+              <Label htmlFor="profile-verify-pass" className="text-xs">
                 Current Password
               </Label>
               <Input
-                id="staff-profile-current-pass"
-                type="password"
+                id="profile-current-pass"
+                type={currentPasswordVisibility.passwordInputType}
                 placeholder="Enter your current password"
                 value={currentPasswordForPass}
                 onChange={(e) => setCurrentPasswordForPass(e.target.value)}
                 required
+                className="pr-10"
               />
+
+              <button
+                type="button"
+                onClick={currentPasswordVisibility.togglePasswordVisibility}
+                aria-label={
+                  currentPasswordVisibility.showPassword
+                    ? "Hide password"
+                    : "Show password"
+                }
+                className="absolute right-0 -bottom-1 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {currentPasswordVisibility.showPassword ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+              </button>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="staff-profile-new-pass" className="text-xs">
+            <div className="relative">
+              <Label htmlFor="profile-new-pass" className="text-xs">
                 New Password
               </Label>
               <Input
-                id="staff-profile-new-pass"
-                type="password"
+                id="profile-new-pass"
+                type={newPasswordVisibility.passwordInputType}
                 placeholder="Enter new password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
+                className="pr-10"
               />
+
+              <button
+                type="button"
+                onClick={newPasswordVisibility.togglePasswordVisibility}
+                aria-label={
+                  newPasswordVisibility.showPassword
+                    ? "Hide password"
+                    : "Show password"
+                }
+                className="absolute right-0 -bottom-1 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {newPasswordVisibility.showPassword ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+              </button>
             </div>
 
             {newPassword && (
               <>
                 <PasswordRequirements password={newPassword} />
-                <div className="space-y-1.5 pt-1">
-                  <Label htmlFor="staff-profile-confirm-pass" className="text-xs">
-                    Re-enter New Password
+                <div className="relative">
+                  <Label htmlFor="profile-new-pass" className="text-xs">
+                    Repeat new password
                   </Label>
                   <Input
-                    id="staff-profile-confirm-pass"
-                    type="password"
+                    id="profile-confirm-pass"
+                    type={confirmPasswordVisibility.passwordInputType}
                     placeholder="Repeat new password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
+                    className="pr-10"
                   />
+
+                  <button
+                    type="button"
+                    onClick={confirmPasswordVisibility.togglePasswordVisibility}
+                    aria-label={
+                      confirmPasswordVisibility.showPassword
+                        ? "Hide password"
+                        : "Show password"
+                    }
+                    className="absolute right-0 -bottom-1 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {confirmPasswordVisibility.showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
                 </div>
               </>
             )}

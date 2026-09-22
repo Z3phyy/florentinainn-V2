@@ -151,7 +151,7 @@ export function AdminSidebar({ className }: AppSidebarProps) {
           <AdminNotificationBell />
           <button
             onClick={toggleMobileMenu}
-            className="p-2 rounded-xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#1A0E13] text-[#130005] dark:text-white hover:bg-[#900546]/10 transition-colors"
+            className="p-2 rounded-xl block md:hidden border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#1A0E13] text-[#130005] dark:text-white hover:bg-[#900546]/10 transition-colors"
           >
             {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>

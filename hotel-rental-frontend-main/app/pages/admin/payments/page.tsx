@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { paymentInterface } from "@/app/types/payment.type";
@@ -45,17 +45,26 @@ import {
   Banknote,
   Smartphone,
   Globe,
-  Building2,
   TrendingUp,
   CreditCard,
   Printer,
-  CheckCircle2,
   Download,
   FileSpreadsheet,
-  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { downloadCSV, downloadPDF, getExportTimestamp } from "@/app/utils/exportFile";
+import {
+  downloadCSV,
+  downloadPDF,
+  getExportTimestamp,
+} from "@/app/utils/exportFile";
+import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
+import { printHtmlDocument } from "@/app/utils/printDocument";
+import {
+  buildReceiptHtml,
+  RECEIPT_STYLES,
+  RECEIPT_PAGE_CSS,
+  ReceiptData,
+} from "@/app/utils/receiptTemplate";
 
 type DatePreset = "all" | "today" | "week" | "month" | "custom";
 type SortOption = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
@@ -70,10 +79,18 @@ function resolvePaymentMethod(p: paymentInterface): {
   const receivedBy = (p.receivedBy || "").toLowerCase();
   const paymentBy = (p.paymentBy || "").toLowerCase();
 
-  if (methodStr.includes("gcash") || paymentBy.includes("gcash") || receivedBy.includes("gcash")) {
+  if (
+    methodStr.includes("gcash") ||
+    paymentBy.includes("gcash") ||
+    receivedBy.includes("gcash")
+  ) {
     return { type: "gcash", label: "GCash" };
   }
-  if (methodStr.includes("online") || receivedBy.includes("online payment") || methodStr.includes("card")) {
+  if (
+    methodStr.includes("online") ||
+    receivedBy.includes("online payment") ||
+    methodStr.includes("card")
+  ) {
     return { type: "online", label: "Online Payment" };
   }
   return { type: "cash", label: "Cash" };
@@ -98,7 +115,11 @@ function formatCurrency(amount: number) {
 }
 
 export default function Page() {
-  const { data: payments = [], isLoading, isError } = useQuery<paymentInterface[]>({
+  const {
+    data: payments = [],
+    isLoading,
+    isError,
+  } = useQuery<paymentInterface[]>({
     queryKey: ["payments"],
     queryFn: async () => {
       const res = await axiosInstance.get("/system/payments");
@@ -126,8 +147,70 @@ export default function Page() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Selected Payment for Receipt Modal
-  const [selectedPayment, setSelectedPayment] = useState<paymentInterface | null>(null);
+  const [selectedPayment, setSelectedPayment] =
+    useState<paymentInterface | null>(null);
+  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
+
+  const brand = getBrand(systemInfo);
+
+  const buildReceiptData = useCallback(
+    (payment: paymentInterface, logoUrl: string): ReceiptData => ({
+      hotelName: brand.hotelName,
+      logoUrl,
+      referenceNo:
+        payment.refNumber || `RCP-${payment._id.slice(-6).toUpperCase()}`,
+      folioNo: payment.folio || "—",
+      guestName: payment.paymentBy || "Guest",
+      receivedBy: payment.receivedBy || "Front Desk",
+      dateLabel: formatDate(payment.date),
+      methodLabel: resolvePaymentMethod(payment).label,
+      amount: Number(payment.amount || 0),
+      balance: Number(payment.balance || 0),
+      issuedAt: new Date().toLocaleString("en-PH", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    }),
+    [brand.hotelName],
+  );
+
+  const receiptPreviewHtml = useMemo(() => {
+    if (!selectedPayment) return "";
+    return buildReceiptHtml(buildReceiptData(selectedPayment, brand.logoUrl));
+  }, [selectedPayment, buildReceiptData, brand.logoUrl]);
+
+  const handlePrintReceipt = useCallback(async () => {
+    if (!selectedPayment || isPrintingReceipt) return;
+
+    setIsPrintingReceipt(true);
+    try {
+      const inlineLogo = await getLogoDataUrl(brand.logoUrl);
+      const printed = await printHtmlDocument({
+        title: `${brand.hotelName} - Receipt ${
+          selectedPayment.refNumber ||
+          selectedPayment._id.slice(-6).toUpperCase()
+        }`,
+        bodyHtml: buildReceiptHtml(
+          buildReceiptData(selectedPayment, inlineLogo),
+        ),
+        styles: RECEIPT_STYLES,
+        pageCss: RECEIPT_PAGE_CSS,
+      });
+      if (!printed)
+        toast.error("Could not open the print dialog. Please try again.");
+    } finally {
+      setIsPrintingReceipt(false);
+    }
+  }, [
+    selectedPayment,
+    isPrintingReceipt,
+    brand.hotelName,
+    brand.logoUrl,
+    buildReceiptData,
+  ]);
 
   // Filtered & Sorted Payments
   const filteredPayments = useMemo(() => {
@@ -151,7 +234,14 @@ export default function Page() {
           const matchesId = p._id?.toLowerCase().includes(query);
           const matchesRef = p.refNumber?.toLowerCase().includes(query);
           const matchesFolio = p.folio?.toLowerCase().includes(query);
-          if (!matchesGuest && !matchesCashier && !matchesId && !matchesRef && !matchesFolio) return false;
+          if (
+            !matchesGuest &&
+            !matchesCashier &&
+            !matchesId &&
+            !matchesRef &&
+            !matchesFolio
+          )
+            return false;
         }
 
         // 2. Method Filter
@@ -195,7 +285,15 @@ export default function Page() {
         }
         return 0;
       });
-  }, [payments, searchQuery, methodFilter, datePreset, sortBy, startDate, endDate]);
+  }, [
+    payments,
+    searchQuery,
+    methodFilter,
+    datePreset,
+    sortBy,
+    startDate,
+    endDate,
+  ]);
 
   // Method Counts for Breakdown Chips
   const methodCounts = useMemo(() => {
@@ -220,7 +318,10 @@ export default function Page() {
 
   // KPI Metrics (Calculated on current filtered dataset)
   const metrics = useMemo(() => {
-    const totalRevenue = filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const totalRevenue = filteredPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0,
+    );
     const count = filteredPayments.length;
     const avgTicket = count > 0 ? totalRevenue / count : 0;
 
@@ -253,10 +354,17 @@ export default function Page() {
       const resolved = resolvePaymentMethod(p);
       const paymentDate = p.date ? new Date(p.date) : new Date();
       const dateOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleDateString("en-PH", { year: "numeric", month: "2-digit", day: "2-digit" })
+        ? paymentDate.toLocaleDateString("en-PH", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          })
         : "";
       const timeOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })
+        ? paymentDate.toLocaleTimeString("en-PH", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
         : "";
 
       const refNo = p.refNumber || `RCP-${p._id.slice(-8).toUpperCase()}`;
@@ -267,7 +375,17 @@ export default function Page() {
       const amount = Number(p.amount || 0).toFixed(2);
       const balance = Number(p.balance || 0).toFixed(2);
 
-      return [refNo, folioNo, dateOnly, timeOnly, guest, channel, cashier, amount, balance];
+      return [
+        refNo,
+        folioNo,
+        dateOnly,
+        timeOnly,
+        guest,
+        channel,
+        cashier,
+        amount,
+        balance,
+      ];
     });
   };
 
@@ -288,24 +406,35 @@ export default function Page() {
       toast.error("No payment records to export.");
       return;
     }
-    downloadCSV(`Florentina_Inn_Payments_${getExportTimestamp()}.csv`, exportHeaders, buildExportRows());
-    toast.success(`Exported ${filteredPayments.length} transaction records to CSV.`);
+    downloadCSV(
+      `Florentina_Inn_Payments_${getExportTimestamp()}.csv`,
+      exportHeaders,
+      buildExportRows(),
+    );
+    toast.success(
+      `Exported ${filteredPayments.length} transaction records to CSV.`,
+    );
   };
 
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
     if (!filteredPayments || filteredPayments.length === 0) {
       toast.error("No payment records to export.");
       return;
     }
     const total = filteredPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-    downloadPDF({
+    // The hotel logo heads the exported ledger, matching the printed reports.
+    const logoDataUrl = await getLogoDataUrl(brand.logoUrl);
+    await downloadPDF({
       filename: `Florentina_Inn_Payments_${getExportTimestamp()}.pdf`,
-      title: `${systemInfo?.systemName || "Florentina Inn"} - Payment Records`,
+      title: `${brand.hotelName} - Payment Records`,
       subtitle: `${filteredPayments.length} transaction(s) - Total: PHP ${total.toFixed(2)}`,
       headers: exportHeaders,
       rows: buildExportRows(),
+      logoDataUrl,
     });
-    toast.success(`Exported ${filteredPayments.length} transaction records to PDF.`);
+    toast.success(
+      `Exported ${filteredPayments.length} transaction records to PDF.`,
+    );
   };
 
   const hasActiveFilters =
@@ -318,33 +447,7 @@ export default function Page() {
 
   return (
     <div className="space-y-6">
-      {/* Print Styles for Official Receipt Modal */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #printable-payment-receipt,
-          #printable-payment-receipt * {
-            visibility: visible !important;
-          }
-          #printable-payment-receipt {
-            position: fixed !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 30px !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
+      <style>{RECEIPT_STYLES}</style>
 
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -356,7 +459,8 @@ export default function Page() {
             Payment Records & Folio
           </h1>
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
-            Audit transactions, filter payment channels, and generate printable guest receipts or export raw CSV ledgers.
+            Audit transactions, filter payment channels, and generate printable
+            guest receipts or export raw CSV ledgers.
           </p>
         </div>
 
@@ -410,7 +514,8 @@ export default function Page() {
             {formatCurrency(metrics.totalRevenue)}
           </p>
           <p className="text-[11px] text-muted-foreground mt-1">
-            Across {metrics.count} recorded transaction{metrics.count !== 1 ? "s" : ""}
+            Across {metrics.count} recorded transaction
+            {metrics.count !== 1 ? "s" : ""}
           </p>
         </div>
 
@@ -423,7 +528,9 @@ export default function Page() {
               <CreditCard className="size-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-foreground mt-2">{metrics.count}</p>
+          <p className="text-2xl font-bold text-foreground mt-2">
+            {metrics.count}
+          </p>
           <p className="text-[11px] text-muted-foreground mt-1">
             Matching current active filters
           </p>
@@ -441,7 +548,9 @@ export default function Page() {
           <p className="text-2xl font-bold text-foreground mt-2">
             {formatCurrency(metrics.avgTicket)}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1">Average transaction spend</p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Average transaction spend
+          </p>
         </div>
       </div>
 
@@ -557,7 +666,9 @@ export default function Page() {
 
         {/* Payment Method Filter Chips */}
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60">
-          <span className="text-[11px] font-semibold text-muted-foreground mr-1">Method:</span>
+          <span className="text-[11px] font-semibold text-muted-foreground mr-1">
+            Method:
+          </span>
 
           <button
             onClick={() => {
@@ -587,7 +698,9 @@ export default function Page() {
           >
             <Banknote className="size-3 text-emerald-600" />
             <span>Cash</span>
-            <span className="text-[10px] opacity-70">({methodCounts.cash})</span>
+            <span className="text-[10px] opacity-70">
+              ({methodCounts.cash})
+            </span>
           </button>
 
           <button
@@ -603,7 +716,9 @@ export default function Page() {
           >
             <Smartphone className="size-3 text-blue-600" />
             <span>GCash</span>
-            <span className="text-[10px] opacity-70">({methodCounts.gcash})</span>
+            <span className="text-[10px] opacity-70">
+              ({methodCounts.gcash})
+            </span>
           </button>
 
           <button
@@ -619,7 +734,9 @@ export default function Page() {
           >
             <Globe className="size-3 text-purple-600" />
             <span>Online Payment</span>
-            <span className="text-[10px] opacity-70">({methodCounts.online})</span>
+            <span className="text-[10px] opacity-70">
+              ({methodCounts.online})
+            </span>
           </button>
         </div>
       </div>
@@ -638,7 +755,9 @@ export default function Page() {
       {isError && (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground rounded-xl border border-border bg-card">
           <AlertCircle className="size-12 mb-3 text-destructive" />
-          <h3 className="text-base font-semibold text-foreground">Failed to load payments</h3>
+          <h3 className="text-base font-semibold text-foreground">
+            Failed to load payments
+          </h3>
           <p className="text-xs text-muted-foreground mt-1">
             Could not fetch payment records. Please try again.
           </p>
@@ -650,27 +769,40 @@ export default function Page() {
           <div className="size-14 rounded-2xl bg-muted/60 flex items-center justify-center mb-3">
             <Receipt className="size-7 text-muted-foreground/60" />
           </div>
-          <h3 className="text-base font-semibold text-foreground">No payments recorded yet</h3>
+          <h3 className="text-base font-semibold text-foreground">
+            No payments recorded yet
+          </h3>
           <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
             Payments will appear automatically when guests reserve or check in.
           </p>
         </div>
       )}
 
-      {!isLoading && !isError && payments.length > 0 && filteredPayments.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground rounded-xl border border-border bg-card text-center">
-          <div className="size-12 rounded-full bg-muted/60 flex items-center justify-center mb-3">
-            <Search className="size-6 text-muted-foreground/60" />
+      {!isLoading &&
+        !isError &&
+        payments.length > 0 &&
+        filteredPayments.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground rounded-xl border border-border bg-card text-center">
+            <div className="size-12 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+              <Search className="size-6 text-muted-foreground/60" />
+            </div>
+            <h3 className="text-sm font-semibold text-foreground">
+              No matching payments found
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1 max-w-[300px]">
+              Try adjusting your search keywords, payment method, or date range
+              filters.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetFilters}
+              className="mt-4 text-xs"
+            >
+              Clear Filters
+            </Button>
           </div>
-          <h3 className="text-sm font-semibold text-foreground">No matching payments found</h3>
-          <p className="text-xs text-muted-foreground mt-1 max-w-[300px]">
-            Try adjusting your search keywords, payment method, or date range filters.
-          </p>
-          <Button variant="outline" size="sm" onClick={resetFilters} className="mt-4 text-xs">
-            Clear Filters
-          </Button>
-        </div>
-      )}
+        )}
 
       {/* ── Payments Table ── */}
       {!isLoading && !isError && filteredPayments.length > 0 && (
@@ -712,7 +844,8 @@ export default function Page() {
                 {paginatedPayments.map((payment) => {
                   const resolvedMethod = resolvePaymentMethod(payment);
                   const displayRef =
-                    payment.refNumber || `RCP-${payment._id.slice(-6).toUpperCase()}`;
+                    payment.refNumber ||
+                    `RCP-${payment._id.slice(-6).toUpperCase()}`;
 
                   return (
                     <TableRow
@@ -784,7 +917,9 @@ export default function Page() {
                             {formatCurrency(Number(payment.balance || 0))}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">
+                            —
+                          </span>
                         )}
                       </TableCell>
 
@@ -834,9 +969,13 @@ export default function Page() {
             {/* Showing Info */}
             <div>
               <span>
-                Showing <strong className="text-foreground">{startIndex + 1}</strong> to{" "}
+                Showing{" "}
+                <strong className="text-foreground">{startIndex + 1}</strong> to{" "}
                 <strong className="text-foreground">{endIndex}</strong> of{" "}
-                <strong className="text-foreground">{filteredPayments.length}</strong> payments
+                <strong className="text-foreground">
+                  {filteredPayments.length}
+                </strong>{" "}
+                payments
               </span>
             </div>
 
@@ -871,7 +1010,9 @@ export default function Page() {
               <Button
                 variant="outline"
                 size="icon"
-                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                }
                 disabled={validCurrentPage >= totalPages}
                 className="size-7"
                 title="Next Page"
@@ -906,126 +1047,49 @@ export default function Page() {
             <DialogHeader className="p-6 pb-4 border-b border-border bg-card">
               <DialogTitle className="flex items-center gap-2 text-base font-bold">
                 <Receipt className="size-5 text-primary" />
-                Payment Receipt
+                Receipt Preview
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Official transaction record for {selectedPayment.paymentBy}.
+                Review the official receipt for {selectedPayment.paymentBy}{" "}
+                before printing.
               </DialogDescription>
             </DialogHeader>
 
             <div className="p-6 space-y-4">
-              {/* Receipt Document */}
-              <div
-                id="printable-payment-receipt"
-                className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs font-sans shadow-xs"
-              >
-                {/* Header */}
-                <div className="text-center space-y-1 border-b border-border pb-3">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <Building2 className="size-4 text-primary" />
-                    <h2 className="font-bold text-sm tracking-tight text-foreground uppercase">
-                      {systemInfo?.systemName || "Hotel Management System"}
-                    </h2>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    Official Hotel Payment Receipt
-                  </p>
-                  <p className="text-[10px] font-mono text-muted-foreground">
-                    Ref:{" "}
-                    {selectedPayment.refNumber ||
-                      `RCP-${selectedPayment._id.slice(-6).toUpperCase()}`}{" "}
-                    · {formatDate(selectedPayment.date)}
-                  </p>
-                </div>
-
-                {/* Details */}
-                <div className="grid grid-cols-2 gap-2.5 text-xs border-b border-border pb-3">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Guest Name</p>
-                    <p className="font-bold">{selectedPayment.paymentBy || "Guest"}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Received By</p>
-                    <p className="font-medium">{selectedPayment.receivedBy || "Staff"}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Payment Date</p>
-                    <p className="font-medium">{formatDate(selectedPayment.date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Payment Method</p>
-                    <p className="font-semibold text-emerald-600 dark:text-emerald-400">
-                      {resolvePaymentMethod(selectedPayment).label}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Folio No.</p>
-                    <p className="font-mono font-medium">{selectedPayment.folio || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground">Reference No.</p>
-                    <p className="font-mono font-medium">
-                      {selectedPayment.refNumber || "—"}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Amount Paid */}
-                <div className="space-y-2 text-xs border-b border-border pb-3">
-                  <div className="flex justify-between items-center text-sm font-bold pt-1">
-                    <span>Amount Paid</span>
-                    <span className="font-mono text-base text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(selectedPayment.amount)}
-                    </span>
-                  </div>
-                  {Number(selectedPayment.balance || 0) > 0 && (
-                    <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-muted-foreground">Remaining Balance</span>
-                      <span className="font-mono text-amber-600 dark:text-amber-400">
-                        {formatCurrency(Number(selectedPayment.balance || 0))}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer / Stamp */}
-                <div className="pt-1 flex justify-between items-end text-[10px] text-muted-foreground">
-                  <div>
-                    <p>Status: Verified Payment</p>
-                    <p>Thank you for choosing us!</p>
-                  </div>
-                  <div className="text-right">
-                    {Number(selectedPayment.balance || 0) > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                        PARTIAL
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-                        <CheckCircle2 className="size-3" /> PAID
-                      </span>
-                    )}
-                  </div>
-                </div>
+              {/* Receipt preview — rendered from the exact HTML that will be
+                  printed, so the cashier reviews the real document. */}
+              <div className="rounded-xl border border-border bg-muted/20 p-4 overflow-x-auto">
+                <div
+                  id="receipt-preview-sheet"
+                  dangerouslySetInnerHTML={{ __html: receiptPreviewHtml }}
+                />
               </div>
 
-              {/* Modal Actions */}
+              <p className="text-[11px] text-muted-foreground text-center">
+                This is exactly how the receipt will look when printed or saved
+                as PDF.
+              </p>
+
+              {/* Modal Actions: Print / Close */}
               <DialogFooter className="flex-row items-center justify-between sm:justify-between gap-2 pt-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => window.print()}
-                  className="text-xs gap-1.5"
+                  onClick={handlePrintReceipt}
+                  disabled={isPrintingReceipt}
+                  className="text-xs gap-1.5 cursor-pointer"
                 >
                   <Printer className="size-3.5 text-primary" />
-                  Print Receipt
+                  {isPrintingReceipt ? "Preparing..." : "Print / Save as PDF"}
                 </Button>
 
                 <Button
                   type="button"
                   size="sm"
+                  variant="secondary"
                   onClick={() => setSelectedPayment(null)}
-                  className="text-xs"
+                  className="text-xs cursor-pointer"
                 >
                   Close
                 </Button>

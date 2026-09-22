@@ -1,7 +1,4 @@
-export async function paymongoBooking(
-    amountInput: string,
-    bookingId: string
-) {
+export async function paymongoBooking(amountInput: string, bookingId: string) {
   const amount = parseInt(amountInput, 10) * 100;
 
   if (amount < 2000) {
@@ -12,9 +9,9 @@ export async function paymongoBooking(
   const referenceId = `${Date.now()}`;
 
   try {
-    const response = await fetch('/api/paymongo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const response = await fetch("/api/paymongo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         amount,
         bookingId,
@@ -25,19 +22,26 @@ export async function paymongoBooking(
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('API Error:', data);
-      alert(`Failed: ${data.error || 'Unknown error'}`);
+      console.error("API Error:", data);
+      alert(`Failed: ${data.error || "Unknown error"}`);
       return;
     }
 
-    // ✅ Direct redirect - no PayMongo.js needed
-    if (data.checkoutUrl) {
-      window.location.href = data.checkoutUrl;
-    } else {
-      alert('Failed to get checkout URL');
+    if (!data.checkoutUrl) {
+      alert("Failed to get checkout URL");
+      return;
     }
+
+    if (data.sessionId) {
+      try {
+        sessionStorage.setItem(`paymongo_session_${bookingId}`, data.sessionId);
+      } catch {}
+    }
+
+    // ✅ Direct redirect - no PayMongo.js needed
+    window.location.href = data.checkoutUrl;
   } catch (error) {
-    console.error('Error:', error);
-    alert('Something went wrong.');
+    console.error("Error:", error);
+    alert("Something went wrong.");
   }
 }

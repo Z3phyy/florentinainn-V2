@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import axiosInstance from "@/app/utils/axios";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import {
   CheckCircle2,
   Printer,
@@ -18,6 +18,7 @@ import {
   Receipt,
   Download,
   ExternalLink,
+  Loader2,
   X,
 } from "lucide-react";
 import { bookingInterface } from "@/app/types/bookings.type";
@@ -67,9 +68,32 @@ function PaymentSuccessContent() {
 
   const [hasCalled, setHasCalled] = useState(false);
   const [paymentError, setPaymentError] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const retryCountRef = useRef(0);
+  const MAX_CLIENT_RETRIES = 3;
+
+  const CONFIRMED_STATUSES = ["reservation", "active", "completed"];
+  const alreadyConfirmed = bookingInfo
+    ? CONFIRMED_STATUSES.includes(bookingInfo.status)
+    : false;
 
   useEffect(() => {
-    if (bookingId && amount && !hasCalled && sessionId && bookingInfo?.clientName) {
+    if (
+      bookingId &&
+      amount &&
+      !hasCalled &&
+      !alreadyConfirmed &&
+      !paymentMutation.isPending &&
+      bookingInfo?.clientName
+    ) {
+      let storedSessionId: string | null = null;
+      try {
+        storedSessionId = sessionStorage.getItem(
+          `paymongo_session_${bookingId}`,
+        );
+      } catch {}
+
       paymentMutation.mutate(
         {
           bookingId,
@@ -78,19 +102,54 @@ function PaymentSuccessContent() {
           method: "Online Payment",
           refNumber: `RSV-${bookingId.slice(-6).toUpperCase()}`,
           gateway,
-          sessionId,
+          sessionId: sessionId || storedSessionId || undefined,
         },
         {
           onSuccess: () => {
+            setPendingMessage(null);
             setHasCalled(true);
           },
-          onError: () => {
-            setPaymentError(true);
+          onError: (err: unknown) => {
+            const data = (err as { response?: { data?: unknown } })?.response
+              ?.data;
+            const errStatus =
+              data && typeof data === "object"
+                ? (data as { status?: unknown }).status
+                : undefined;
+            const message =
+              data && typeof data === "object"
+                ? (data as { message?: unknown }).message
+                : undefined;
+
+            if (
+              errStatus === "pending" &&
+              retryCountRef.current < MAX_CLIENT_RETRIES
+            ) {
+              retryCountRef.current += 1;
+              setPendingMessage(
+                typeof message === "string"
+                  ? message
+                  : "Your payment is still being confirmed.",
+              );
+              setTimeout(() => setRetryTick((t) => t + 1), 3000);
+            } else {
+              setPendingMessage(null);
+              setPaymentError(true);
+            }
           },
-        }
+        },
       );
     }
-  }, [bookingInfo, bookingId, amount, gateway, sessionId, hasCalled]);
+  }, [
+    bookingInfo,
+    bookingId,
+    amount,
+    gateway,
+    sessionId,
+    hasCalled,
+    alreadyConfirmed,
+    retryTick,
+  ]);
 
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-PH", {
@@ -125,7 +184,8 @@ function PaymentSuccessContent() {
                 alt={hotelName}
                 className="size-full object-contain"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                  (e.target as HTMLImageElement).src =
+                    "/Florentina Inn Logo.png";
                 }}
               />
             </div>
@@ -157,12 +217,22 @@ function PaymentSuccessContent() {
           {/* Left Column: Confirmation & Stay Details (5 cols) */}
           <div className="lg:col-span-5 space-y-4 print:hidden">
             <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-6 shadow-xs text-center space-y-4">
-              {/* Success Badge */}
-              <div className="size-16 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto ring-8 ring-emerald-500/5">
+              {/* Status Badge */}
+              <div
+                className={`size-16 rounded-full flex items-center justify-center mx-auto ring-8 ${
+                  paymentError
+                    ? "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/5"
+                    : hasCalled || alreadyConfirmed
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/5"
+                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/5"
+                }`}
+              >
                 {paymentError ? (
                   <X className="size-9 text-red-500" />
-                ) : (
+                ) : hasCalled || alreadyConfirmed ? (
                   <CheckCircle2 className="size-9" />
+                ) : (
+                  <Loader2 className="size-9 animate-spin" />
                 )}
               </div>
 
@@ -176,21 +246,39 @@ function PaymentSuccessContent() {
                       Payment Could Not Be Verified
                     </h1>
                     <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
-                      We were unable to confirm your payment with the gateway. Please contact the front desk with your reference.
+                      We were unable to confirm your payment with the gateway.
+                      Please contact the front desk with your reference.
                     </p>
                   </>
-                ) : (
+                ) : hasCalled || alreadyConfirmed ? (
                   <>
                     <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mb-2">
                       <ShieldCheck className="size-3.5" />
                       Payment Confirmed & Verified
                     </div>
-                <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
-                  Reservation Confirmed!
-                </h1>
-                <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
-                  Thank you, <strong className="text-[#130005] dark:text-white">{bookingInfo?.clientName || "valued guest"}</strong>. Your suite is reserved at Florentina Inn.
-                </p>
+                    <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
+                      Reservation Confirmed!
+                    </h1>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
+                      Thank you,{" "}
+                      <strong className="text-[#130005] dark:text-white">
+                        {bookingInfo?.clientName || "valued guest"}
+                      </strong>
+                      . Your suite is reserved at Florentina Inn.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 mb-2">
+                      Confirming Payment
+                    </div>
+                    <h1 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
+                      Confirming Your Payment…
+                    </h1>
+                    <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 leading-relaxed">
+                      {pendingMessage ||
+                        "We're verifying your payment with the gateway. This only takes a moment — please don't close this page."}
+                    </p>
                   </>
                 )}
               </div>
@@ -211,15 +299,23 @@ function PaymentSuccessContent() {
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="font-serif text-sm font-bold text-[#130005] dark:text-white truncate">
-                      {bookingInfo.room.roomNumber ? `Room ${bookingInfo.room.roomNumber} · ` : ""}
+                      {bookingInfo.room.roomNumber
+                        ? `Room ${bookingInfo.room.roomNumber} · `
+                        : ""}
                       {bookingInfo.room.category}
                     </p>
                     <p className="text-xs font-semibold text-[#900546] dark:text-[#F968AC] mt-0.5">
-                      ₱{bookingInfo.room.price.toLocaleString()}/night
+                      ₱{bookingInfo.room.price.toLocaleString()}/day
                     </p>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-1 flex items-center gap-1">
                       <Clock className="size-3 text-[#618685]" />
-                      Arrival: {bookingInfo.arrivalDate ? new Date(bookingInfo.arrivalDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Flexible"}
+                      Arrival:{" "}
+                      {bookingInfo.arrivalDate
+                        ? new Date(bookingInfo.arrivalDate).toLocaleDateString(
+                            "en-US",
+                            { month: "short", day: "numeric", year: "numeric" },
+                          )
+                        : "Flexible"}
                     </p>
                   </div>
                 </div>
@@ -232,7 +328,8 @@ function PaymentSuccessContent() {
                   Flexible 24/7 Anytime Check-in
                 </p>
                 <p className="text-[11px] text-[#5C454B] dark:text-gray-300 leading-relaxed">
-                  Our front desk reception is staffed 24 hours daily. Please show this voucher or state your reservation name upon arrival.
+                  Our front desk reception is staffed 24 hours daily. Please
+                  show this voucher or state your reservation name upon arrival.
                 </p>
               </div>
 
@@ -258,7 +355,11 @@ function PaymentSuccessContent() {
             >
               {/* Watermark Logo in Voucher background */}
               <div className="pointer-events-none absolute right-4 bottom-4 size-48 opacity-[0.03] select-none">
-                <img src={logoUrl} alt="" className="size-full object-contain" />
+                <img
+                  src={logoUrl}
+                  alt=""
+                  className="size-full object-contain"
+                />
               </div>
 
               {/* Voucher Header */}
@@ -270,7 +371,8 @@ function PaymentSuccessContent() {
                       alt={hotelName}
                       className="size-full object-contain"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = "/Florentina Inn Logo.png";
+                        (e.target as HTMLImageElement).src =
+                          "/Florentina Inn Logo.png";
                       }}
                     />
                   </div>
@@ -289,7 +391,10 @@ function PaymentSuccessContent() {
                     OFFICIAL VOUCHER
                   </span>
                   <p className="text-[11px] font-mono font-bold text-[#130005] dark:text-white mt-1.5">
-                    REF: {bookingId ? `RSV-${bookingId.slice(-8).toUpperCase()}` : "RSV-ONLINE"}
+                    REF:{" "}
+                    {bookingId
+                      ? `RSV-${bookingId.slice(-8).toUpperCase()}`
+                      : "RSV-ONLINE"}
                   </p>
                 </div>
               </div>
@@ -310,11 +415,14 @@ function PaymentSuccessContent() {
                   </span>
                   <span className="font-bold text-[#130005] dark:text-white">
                     {bookingInfo?.arrivalDate
-                      ? new Date(bookingInfo.arrivalDate).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
+                      ? new Date(bookingInfo.arrivalDate).toLocaleDateString(
+                          "en-US",
+                          {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )
                       : dateStr}
                   </span>
                 </div>
@@ -356,13 +464,36 @@ function PaymentSuccessContent() {
               <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-2 text-xs">
                 <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
                   <span>Room Reservation Rate</span>
-                  <span className="font-medium text-[#130005] dark:text-white">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-medium text-[#130005] dark:text-white">
+                    ₱
+                    {total.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
                 <div className="h-px bg-[#D9C3C3] dark:bg-white/10 my-1" />
                 <div className="flex items-center justify-between text-sm font-bold text-[#130005] dark:text-white">
-                  <span className="font-serif text-[#900546] dark:text-[#F968AC]">Total Amount Paid</span>
-                  <span className="text-[#900546] dark:text-[#F968AC]">₱{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-serif text-[#900546] dark:text-[#F968AC]">
+                    Total Amount Paid
+                  </span>
+                  <span className="text-[#900546] dark:text-[#F968AC]">
+                    ₱
+                    {total.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#900546]/30 bg-[#900546]/5 p-3.5 text-[11px] leading-relaxed text-[#5C454B] dark:text-gray-300">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#900546] dark:text-[#F968AC] mb-0.5">
+                  Non-Refundable Reservation
+                </span>
+                This online reservation is non-refundable. The amount paid is
+                not returned for cancellations, date changes, early departures
+                or no-shows.
               </div>
 
               {/* Complimentary Amenities Included */}
@@ -371,7 +502,9 @@ function PaymentSuccessContent() {
                   Included Amenities & Services
                 </span>
                 <p>
-                  • Airconditioned rooms • Hot & cold shower • Cable TV / DVD • Free WiFi internet • We serve Breakfast • Private Parking • Backup generator
+                  • Airconditioned rooms • Hot & cold shower • Cable TV / DVD •
+                  Free WiFi internet • We serve Breakfast • Private Parking •
+                  Backup generator
                 </p>
               </div>
             </div>

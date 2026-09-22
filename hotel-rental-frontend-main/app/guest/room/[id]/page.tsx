@@ -19,6 +19,7 @@ import {
   Star,
   Sparkles,
   ShieldCheck,
+  ShieldAlert,
   Clock,
   MapPin,
   Calendar,
@@ -411,6 +412,19 @@ export default function RoomDetailPage() {
                   </div>
 
                   <div className="border-t border-[#D9C3C3] dark:border-white/10" />
+
+                  {/* Non-refundable policy — shown before the guest opens the
+                      reservation form, and acknowledged inside it. */}
+                  <div className="rounded-2xl border border-[#900546]/30 bg-[#900546]/5 p-3.5 space-y-1">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-[#900546] dark:text-[#F968AC]">
+                      <ShieldAlert className="size-3.5 shrink-0" />
+                      Non-Refundable Online Reservation
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-[#5C454B] dark:text-gray-300">
+                      Payments for online reservations are not refundable — cancellations, date
+                      changes and no-shows are not eligible for a refund.
+                    </p>
+                  </div>
 
                   {/* Interactive Booking Trigger */}
                   <div className="space-y-3">
