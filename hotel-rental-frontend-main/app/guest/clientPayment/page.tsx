@@ -33,6 +33,16 @@ function PaymentSuccessContent() {
   const gateway = searchParams.get("gateway") || "paymongo";
   const sessionId = searchParams.get("session_id");
 
+  const [verificationCode, setVerificationCode] = useState("");
+
+  useEffect(() => {
+    if (!bookingId) return;
+    try {
+      const stored = sessionStorage.getItem(`reservation_code_${bookingId}`);
+      if (stored) setVerificationCode(stored);
+    } catch {}
+  }, [bookingId]);
+
   const { data: systemInfo } = useQuery<systemInterface>({
     queryKey: ["systeminfo"],
     queryFn: async (): Promise<systemInterface> => {
@@ -395,6 +405,9 @@ function PaymentSuccessContent() {
                     {bookingId
                       ? `RSV-${bookingId.slice(-8).toUpperCase()}`
                       : "RSV-ONLINE"}
+                  </p>
+                  <p className="text-[10px] font-mono font-semibold text-[#618685] mt-0.5">
+                    VERIFY CODE: {verificationCode || "—"}
                   </p>
                 </div>
               </div>

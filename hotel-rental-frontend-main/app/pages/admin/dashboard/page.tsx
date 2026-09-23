@@ -291,8 +291,10 @@ export default function Page() {
   >({
     queryKey: ["dashboard-payments"],
     queryFn: async () => {
-      const res = await axiosInstance.get("/system/payments");
-      return res.data;
+      const res = await axiosInstance.get("/system/payments", {
+        params: { limit: 500, page: 1 },
+      });
+      return res.data?.items || [];
     },
   });
 

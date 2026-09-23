@@ -8,12 +8,16 @@ import { CheckinModal } from "./components/checkinModal";
 import { Loader2, Bed, CalendarDays, User, Hash, Sparkles, Mail, Phone, Coins } from "lucide-react";
 import { CheckoutModal } from "./components/checkoutmodal";
 import { PartialPaymentModal } from "./components/partialPaymentModal";
+import { ExtendStayModal } from "./components/extendStayModal";
+import { BookingHistoryDialog } from "../reservation/components/bookingHistoryDialog";
 
 export default function Page() {
   const { data: bookings, isLoading } = useQuery<bookingInterface[]>({
     queryKey: ["active-bookings"],
     queryFn: async () => {
-      const res = await axiosInstance.get("/booking");
+      const res = await axiosInstance.get("/booking", {
+        params: { status: "active" },
+      });
       const all: bookingInterface[] = res.data;
       // Filter only active bookings
       return all.filter((b) => b.status === "active");
@@ -125,6 +129,7 @@ export default function Page() {
                           ₱{room.price.toLocaleString()}/day
                         </p>
                       </div>
+                      <BookingHistoryDialog booking={booking} />
                     </div>
 
                     <div className="h-px bg-[#D9C3C3]/40 dark:bg-white/10" />
@@ -180,9 +185,12 @@ export default function Page() {
                 </div>
 
                 {/* Card Action Footer */}
-                <div className="p-5 pt-0">
+                <div className="p-5 pt-0 space-y-2">
                   <PartialPaymentModal booking={booking} />
-                  <CheckoutModal booking={booking} />
+                  <div className="flex gap-2">
+                    <ExtendStayModal booking={booking} />
+                    <CheckoutModal booking={booking} />
+                  </div>
                 </div>
               </div>
             );

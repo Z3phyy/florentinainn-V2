@@ -15,6 +15,7 @@ import {
   Sparkles,
   ExternalLink,
   UserRound,
+  BookUser,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import useStaffNotificationSound from "@/app/hooks/useStaffNotificationSound";
@@ -50,6 +51,12 @@ const navigationItems = [
     url: "/pages/staff/guest",
     icon: Users,
     permision: "frontdesk management",
+  },
+  {
+    title: "Guest Directory",
+    url: "/pages/staff/guest-directory",
+    icon: BookUser,
+    permision: "guest records",
   },
   {
     title: "Reservations",

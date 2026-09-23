@@ -25,14 +25,48 @@ export class RoomService {
     await RoomModel.findByIdAndUpdate(id, {status});
   }
 
-  static async toggleMaintenance(id: string) {
+  static async toggleMaintenance(
+    id: string,
+    options?: {
+      reason?: string;
+      assignedMaintainer?: string;
+      notes?: string;
+      changedBy?: string;
+    },
+  ) {
     const room = await RoomModel.findById(id);
     if (!room) throw new Error("Room not found");
     if (room.status !== "available" && room.status !== "maintenance") {
-      return room.status;
+      throw new Error(`Room cannot be toggled while it is ${room.status}`);
     }
     const newStatus = room.status === "maintenance" ? "available" : "maintenance";
-    await RoomModel.findByIdAndUpdate(id, { status: newStatus });
+    const now = new Date();
+    await RoomModel.findByIdAndUpdate(id, {
+      status: newStatus,
+      ...(newStatus === "maintenance"
+        ? {
+            maintenanceReason: options?.reason || room.maintenanceReason || "",
+            assignedMaintainer:
+              options?.assignedMaintainer || room.assignedMaintainer || "",
+            maintenanceNotes: options?.notes || "",
+            maintenanceStartedAt: now,
+            maintenanceCompletedAt: null,
+          }
+        : {
+            maintenanceCompletedAt: now,
+          }),
+      $push: {
+        maintenanceHistory: {
+          action: newStatus === "maintenance" ? "flagged" : "resolved",
+          note:
+            newStatus === "maintenance"
+              ? options?.notes || options?.reason || "Flagged for maintenance"
+              : "Maintenance completed",
+          changedBy: options?.changedBy || "Administrator",
+          changedAt: now,
+        },
+      },
+    });
     return newStatus;
   }
 
@@ -62,5 +96,126 @@ export class RoomService {
     await RoomModel.findByIdAndUpdate(id, {
       $pull: { images: url },
     });
+  }
+
+  static async updateHousekeeping(
+    id: string,
+    data: {
+      housekeepingStatus: string;
+      assignedHousekeeper?: string;
+      housekeepingNotes?: string;
+      changedBy?: string;
+    },
+  ) {
+    const room = await RoomModel.findById(id);
+    if (!room) throw new Error("Room not found");
+
+    const from = room.housekeepingStatus || "clean";
+    const target = data.housekeepingStatus;
+
+    const transitions: Record<string, string[]> = {
+      clean: ["dirty", "cleaning"],
+      dirty: ["cleaning"],
+      cleaning: ["clean"],
+      inspected: ["dirty", "out-of-service"],
+      "out-of-service": ["dirty"],
+    };
+
+    if (target === from) {
+      throw new Error(`Room is already marked as ${target}`);
+    }
+    const allowed = transitions[from] || [];
+    if (!allowed.includes(target)) {
+      throw new Error(
+        `Cannot change housekeeping from "${from}" to "${target}". Allowed: ${allowed.join(", ")} or none (no change).`,
+      );
+    }
+
+    const isStarted = target === "cleaning" && (!room.housekeepingStartedAt || room.housekeepingStatus === "dirty");
+    const now = new Date();
+
+    return RoomModel.findByIdAndUpdate(
+      id,
+      {
+        housekeepingStatus: target,
+        ...(data.assignedHousekeeper !== undefined
+          ? { assignedHousekeeper: data.assignedHousekeeper }
+          : {}),
+        ...(data.housekeepingNotes !== undefined
+          ? { housekeepingNotes: data.housekeepingNotes }
+          : {}),
+        ...(isStarted
+          ? { housekeepingStartedAt: now, housekeepingUpdatedAt: now }
+          : { housekeepingUpdatedAt: now }),
+        $push: {
+          housekeepingHistory: {
+            status: target,
+            from,
+            note: data.housekeepingNotes || "",
+            changedBy: data.changedBy || "",
+            changedAt: now,
+          },
+        },
+      },
+      { new: true },
+    );
+  }
+
+  static async updateMaintenanceDetails(
+    id: string,
+    data: {
+      reason?: string;
+      assignedMaintainer?: string;
+      notes?: string;
+      changedBy?: string;
+    },
+  ) {
+    const room = await RoomModel.findById(id);
+    if (!room) throw new Error("Room not found");
+    const now = new Date();
+    return RoomModel.findByIdAndUpdate(
+      id,
+      {
+        maintenanceReason: data.reason || room.maintenanceReason || "",
+        assignedMaintainer:
+          data.assignedMaintainer || room.assignedMaintainer || "",
+        maintenanceNotes:
+          data.notes !== undefined ? data.notes : room.maintenanceNotes || "",
+        maintenanceStartedAt: room.maintenanceStartedAt || now,
+        $push: {
+          maintenanceHistory: {
+            action: "details",
+            note: data.notes || "Maintenance details updated",
+            changedBy: data.changedBy || "Administrator",
+            changedAt: now,
+          },
+        },
+      },
+      { new: true },
+    );
+  }
+
+  static async markHousekeepingDirty(
+    id: string,
+    changedBy?: string,
+    note?: string,
+  ) {
+    return RoomModel.findByIdAndUpdate(
+      id,
+      {
+        housekeepingStatus: "dirty",
+        housekeepingUpdatedAt: new Date(),
+        $push: {
+          housekeepingHistory: {
+            status: "dirty",
+            from: "",
+            note: note || "",
+            changedBy: changedBy || "",
+            changedAt: new Date(),
+          },
+        },
+      },
+      { new: true },
+    );
   }
 }

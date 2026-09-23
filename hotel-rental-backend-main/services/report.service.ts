@@ -29,6 +29,7 @@ export class ReportService {
     const rooms = await RoomModel.find().sort({ category: 1 });
     return rooms.map((room: any) => ({
       roomId: room._id,
+      roomNumber: room.roomNumber || "",
       category: room.category,
       price: room.price,
       status: room.status,
@@ -46,10 +47,37 @@ export class ReportService {
       0,
     );
 
+    const refundedAmount = filtered.reduce(
+      (sum: number, p: any) =>
+        sum +
+        (p.status === "refunded" ? (p.amount || 0) : 0) +
+        (p.refundedAt ? 0 : 0),
+      0,
+    );
+
+    const methodBreakdown: Record<string, { count: number; amount: number }> = {};
+    for (const p of filtered) {
+      const method = (p.method || "Cash").trim() || "Cash";
+      if (!methodBreakdown[method]) {
+        methodBreakdown[method] = { count: 0, amount: 0 };
+      }
+      methodBreakdown[method].count++;
+      methodBreakdown[method].amount += p.amount || 0;
+    }
+
+    const refundedCount = filtered.filter(
+      (p: any) => p.status === "refunded",
+    ).length;
+
     return {
       month,
       year,
       totalRevenue,
+      refundedAmount,
+      netRevenue: Math.max(0, totalRevenue - refundedAmount),
+      refundedCount,
+      paymentCount: filtered.length,
+      methodBreakdown,
       payments: filtered.map((p: any) => ({
         _id: p._id,
         date: p.date,
@@ -60,6 +88,9 @@ export class ReportService {
         refNumber: p.refNumber,
         folio: p.folio,
         balance: p.balance,
+        status: p.status,
+        refundedAt: p.refundedAt || null,
+        refundReason: p.refundReason || "",
       })),
     };
   }

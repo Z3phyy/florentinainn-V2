@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { formatTime12hr } from "@/app/utils/customFunction";
-import { roomInterface } from "@/app/types/room.type";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { paymentInterface } from "@/app/types/payment.type";
 import { systemInterface } from "@/app/types/system.type";
@@ -49,6 +48,11 @@ interface RevenueReportData {
   month: MonthFilter;
   year: number;
   totalRevenue: number;
+  refundedAmount: number;
+  netRevenue: number;
+  refundedCount: number;
+  paymentCount: number;
+  methodBreakdown: Record<string, { count: number; amount: number }>;
   payments: paymentInterface[];
 }
 
@@ -56,6 +60,15 @@ interface PopularRoomReportData {
   month: MonthFilter;
   year: number;
   popularRooms: PopularRoomEntry[];
+}
+
+interface OccupancyRoomEntry {
+  roomId: string;
+  roomNumber: string;
+  category: string;
+  price: number;
+  status: string;
+  maintenance: string;
 }
 
 // ─── Constants ───
@@ -323,7 +336,7 @@ function OccupancyReportContent({
   rooms,
   brand,
 }: {
-  rooms: roomInterface[];
+  rooms: OccupancyRoomEntry[];
   brand: ReportBrand;
 }) {
   const total = rooms.length;
@@ -399,7 +412,7 @@ function OccupancyReportContent({
                   ? "text-violet-600 bg-violet-50 dark:bg-violet-950/30"
                   : "text-red-600 bg-red-50 dark:bg-red-950/30";
           return (
-            <tr key={room._id} className="hover:bg-muted/30">
+            <tr key={room.roomId} className="hover:bg-muted/30">
               <td className="px-4 py-2.5 text-xs text-muted-foreground">
                 {i + 1}
               </td>
@@ -440,8 +453,24 @@ function RevenueReportContent({
   data: RevenueReportData;
   brand: ReportBrand;
 }) {
-  const { payments, totalRevenue } = data;
+  const {
+    payments,
+    totalRevenue,
+    refundedAmount,
+    netRevenue,
+    refundedCount,
+    paymentCount,
+    methodBreakdown,
+  } = data;
   const period = periodLabel(data.month, data.year);
+  const net = netRevenue ?? totalRevenue - (refundedAmount ?? 0);
+  const methods = Object.entries(methodBreakdown ?? {});
+
+  const money = (value: number) =>
+    (value ?? 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   return (
     <div className="relative">
@@ -457,68 +486,159 @@ function RevenueReportContent({
       />
 
       {/* Revenue Summary */}
-      <div className="rounded-lg border-2 border-primary/20 bg-primary/[0.02] p-5 mb-6 text-center">
-        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-          Total Revenue for {period}
-        </p>
-        <p className="text-4xl font-bold text-foreground">
-          &#x20B1;
-          {totalRevenue.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Total Transactions: {payments.length}
-        </p>
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-lg border border-border bg-card p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Gross Revenue
+          </p>
+          <p className="text-2xl font-bold text-foreground">
+            &#x20B1;{money(totalRevenue)}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {paymentCount ?? payments.length} transactions
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Refunded
+          </p>
+          <p className="text-2xl font-bold text-red-600">
+            &#x20B1;{money(refundedAmount)}
+          </p>
+          <p className="text-[10px] text-red-600/70 mt-0.5">
+            {refundedCount ?? 0} refunded payments
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Net Revenue
+          </p>
+          <p className="text-2xl font-bold text-emerald-600">
+            &#x20B1;{money(net)}
+          </p>
+          <p className="text-[10px] text-emerald-600/70 mt-0.5">
+            Revenue after refunds
+          </p>
+        </div>
       </div>
+
+      {/* Payment Method Breakdown */}
+      {methods.length > 0 && (
+        <div className="rounded-lg border border-border p-4 mb-6">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Payment Method Breakdown
+          </p>
+          <div className="space-y-2">
+            {methods.map(([method, entry]) => {
+              const share =
+                totalRevenue > 0 ? ((entry.amount / totalRevenue) * 100) : 0;
+              return (
+                <div key={method} className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-sm font-medium capitalize">
+                    {method}
+                  </span>
+                  <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-500"
+                      style={{ width: `${share}%` }}
+                    />
+                  </div>
+                  <span className="w-28 shrink-0 text-right text-xs text-muted-foreground">
+                    &#x20B1;{money(entry.amount)}
+                    <span className="ml-1 text-[10px]">({entry.count})</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {payments.length > 0 ? (
         <>
           <PaperTable
-            headers={["#", "Date", "Amount (₱)", "Received By", "Reference"]}
+            headers={[
+              "#",
+              "Date",
+              "Amount (₱)",
+              "Received By",
+              "Status",
+              "Reference",
+            ]}
           >
-            {payments.map((p, i) => (
-              <tr key={p._id} className="hover:bg-muted/30">
-                <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                  {i + 1}
-                </td>
-                <td className="px-4 py-2.5 font-medium">
-                  {new Date(p.date).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </td>
-                <td className="px-4 py-2.5 font-mono font-semibold text-green-600 dark:text-green-400">
-                  &#x20B1;
-                  {p.amount.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground">
-                  {p.receivedBy}
-                </td>
-                <td className="px-4 py-2.5 text-[10px] font-mono text-muted-foreground">
-                  {p._id.slice(-8).toUpperCase()}
-                </td>
-              </tr>
-            ))}
+            {payments.map((p, i) => {
+              const refunded = p.status === "refunded";
+              return (
+                <tr key={p._id} className="hover:bg-muted/30">
+                  <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                    {i + 1}
+                  </td>
+                  <td className="px-4 py-2.5 font-medium">
+                    {new Date(p.date).toLocaleDateString("en-US", {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </td>
+                  <td
+                    className={`px-4 py-2.5 font-mono font-semibold ${
+                      refunded
+                        ? "text-red-600 dark:text-red-400 line-through"
+                        : "text-green-600 dark:text-green-400"
+                    }`}
+                  >
+                    &#x20B1;
+                    {p.amount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="px-4 py-2.5 text-muted-foreground">
+                    {p.receivedBy}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                        refunded
+                          ? "text-red-600 bg-red-50 dark:bg-red-950/30"
+                          : "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30"
+                      }`}
+                    >
+                      {refunded ? "Refunded" : "Paid"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-[10px] font-mono text-muted-foreground">
+                    {p._id.slice(-8).toUpperCase()}
+                  </td>
+                </tr>
+              );
+            })}
           </PaperTable>
 
           {/* Running Total */}
           <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex justify-between items-center">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Grand Total
+                Gross Revenue
               </span>
-              <span className="text-lg font-bold">
-                &#x20B1;
-                {totalRevenue.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+              <span className="text-sm font-bold">
+                &#x20B1;{money(totalRevenue)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center mt-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-red-600">
+                Total Refunds
+              </span>
+              <span className="text-sm font-bold text-red-600">
+                &#x20B1;{money(refundedAmount)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center mt-1 pt-2 border-t border-border">
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
+                Net Revenue
+              </span>
+              <span className="text-lg font-bold text-emerald-600">
+                &#x20B1;{money(net)}
               </span>
             </div>
           </div>
@@ -888,6 +1008,11 @@ const REPORT_PRINT_STYLES = `
   .flex { display: flex; }
   .items-center { align-items: center; }
   .justify-between { justify-content: space-between; }
+  .gap-2 { gap: 6px; }
+  .gap-3 { gap: 10px; }
+  .w-28 { width: 120px; }
+  .shrink-0 { flex-shrink: 0; }
+  .space-y-2 > * + * { margin-top: 8px; }
 `;
 
 // Prints the report sheet currently open in the modal. The logo is inlined as
@@ -936,13 +1061,14 @@ export default function Page() {
 
   const brand = getBrand(systemInfo);
 
-  // ── Fetch all rooms (for occupancy) ──
-  const { data: rooms, isLoading: roomsLoading } = useQuery<roomInterface[]>({
-    queryKey: ["rooms"],
+  // ── Fetch occupancy report (admin-only endpoint) ──
+  const { data: rooms, isLoading: roomsLoading } = useQuery<OccupancyRoomEntry[]>({
+    queryKey: ["report-occupancy"],
     queryFn: async () => {
-      const res = await axiosInstance.get("/room");
+      const res = await axiosInstance.get("/reports/occupancy");
       return res.data;
     },
+    enabled: activeReport === "occupancy",
   });
 
   // ── Fetch payments (for revenue report) ──
@@ -1068,16 +1194,26 @@ export default function Page() {
       toast.error(`No revenue transactions recorded for ${selectedPeriod}.`);
       return;
     }
-    const { payments, totalRevenue, month, year } = revenueData;
+    const { payments, totalRevenue, refundedAmount, netRevenue, month, year } =
+      revenueData;
     const period = periodLabel(month, year);
+    const net = netRevenue ?? totalRevenue - (refundedAmount ?? 0);
+    const methods = Object.entries(revenueData.methodBreakdown ?? {});
 
     const summaryRows = [
       `"${brand.hotelName.toUpperCase()} - ${month === ALL_MONTHS ? "ANNUAL" : "MONTHLY"} REVENUE REPORT"`,
       `"Period","${period}"`,
       `"Total Revenue (PHP)",${Number(totalRevenue || 0).toFixed(2)}`,
       `"Total Transactions",${payments.length}`,
+      `"Refunded Amount (PHP)",${Number(refundedAmount || 0).toFixed(2)}`,
+      `"Refunded Payments",${Number(revenueData.refundedCount || 0)}`,
+      `"Net Revenue (PHP)",${Number(net || 0).toFixed(2)}`,
+      ...methods.map(
+        ([method, entry]) =>
+          `"Method - ${method.replace(/"/g, '""')}",${Number(entry.amount || 0).toFixed(2)},${entry.count || 0}`,
+      ),
       `""`,
-      `"#","Transaction Date","Reference No.","Payment Channel / Received By","Amount (PHP)"`,
+      `"#","Transaction Date","Reference No.","Payment Channel / Received By","Status","Amount (PHP)"`,
     ];
 
     const dataRows = payments.map((p, i) => {
@@ -1087,8 +1223,9 @@ export default function Page() {
         : "";
       const ref = `"${(p.refNumber || p._id || "").slice(-8).toUpperCase()}"`;
       const channel = `"${(p.receivedBy || "Front Desk").replace(/"/g, '""')}"`;
+      const status = `"${p.status === "refunded" ? "Refunded" : "Paid"}"`;
       const amt = Number(p.amount || 0).toFixed(2);
-      return `${i + 1},"${dateStr}",${ref},${channel},${amt}`;
+      return `${i + 1},"${dateStr}",${ref},${channel},${status},${amt}`;
     });
 
     const csv = [...summaryRows, ...dataRows].join("\r\n");

@@ -190,6 +190,15 @@ export function CheckinModal({
         return;
       }
 
+      try {
+        if (response.data?.verificationCode) {
+          sessionStorage.setItem(
+            `reservation_code_${bookingId}`,
+            response.data.verificationCode,
+          );
+        }
+      } catch {}
+
       const amount = systemInfo?.paymentMin?.toString() || "1000";
       if (paymentMode === "stripe") {
         stripeBooking(amount, bookingId);

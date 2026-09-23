@@ -7,6 +7,7 @@ import axiosInstance from "@/app/utils/axios";
 import { NotificationResponse } from "@/app/types/notification.type";
 import { formatAlertTimeAgo } from "@/app/utils/formatTime";
 import useNotificationStream from "@/app/hooks/useNotificationStream";
+import { NotificationPreferences } from "@/components/ui/notificationPreferences";
 import {
   Bell,
   Calendar,
@@ -18,6 +19,7 @@ import {
   Trash2,
   Loader2,
   X,
+  SprayCan,
 } from "lucide-react";
 
 type AlertFilter = "ALL" | "ACCOUNT" | "RESERVATION" | "MAINTENANCE" | "CHAT";
@@ -30,6 +32,8 @@ function getItemIcon(type: string) {
       return <Calendar className="size-4" />;
     case "maintenance":
       return <Wrench className="size-4" />;
+    case "housekeeping":
+      return <SprayCan className="size-4" />;
     case "chat":
       return <MessageSquare className="size-4" />;
     default:
@@ -45,6 +49,8 @@ function getItemBadgeStyle(type: string) {
       return "bg-[#900546]/10 text-[#900546] dark:text-[#F968AC]";
     case "maintenance":
       return "bg-amber-500/10 text-amber-600 dark:text-amber-400";
+    case "housekeeping":
+      return "bg-sky-500/10 text-sky-600 dark:text-sky-400";
     case "chat":
       return "bg-[#618685]/15 text-[#618685] dark:text-[#88afae]";
     default:
@@ -263,7 +269,20 @@ refetchInterval: 60000,
           </div>
 
           {/* Footer */}
-          <div className="p-3 bg-[#FAF5F5] dark:bg-[#130005] border-t border-[#D9C3C3] dark:border-white/10 flex items-center justify-end text-xs">
+          <div className="p-3 bg-[#FAF5F5] dark:bg-[#130005] border-t border-[#D9C3C3] dark:border-white/10 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5">
+              <NotificationPreferences
+                endpoint="/system/notifications/prefs"
+                onSaved={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: ["admin-notifications"],
+                  })
+                }
+              />
+              <span className="text-[11px] font-semibold text-[#5C454B] dark:text-gray-400">
+                Preferences
+              </span>
+            </div>
             <button
               onClick={() => clearNotifications()}
               disabled={(notifications?.items?.length || 0) === 0 || isClearing}

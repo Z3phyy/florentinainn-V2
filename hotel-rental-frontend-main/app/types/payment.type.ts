@@ -1,6 +1,3 @@
-   
-
-
 export interface paymentInterfaceInput {
     date: string,
     amount: number,
@@ -10,6 +7,11 @@ export interface paymentInterfaceInput {
     refNumber?: string,
     folio?: string,
     balance?: number,
+    status?: string,
+    refundedAt?: string | null,
+    refundedBy?: string,
+    refundReason?: string,
+    refundRef?: string,
 }
 
 export interface paymentInterface extends paymentInterfaceInput {

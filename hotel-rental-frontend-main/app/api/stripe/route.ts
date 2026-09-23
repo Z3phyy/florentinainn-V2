@@ -27,14 +27,28 @@ export async function POST(req: Request) {
       metadata: {  bookingId },
     });
 
-    // ✅ Return the checkout URL
-    return NextResponse.json({ 
-      checkoutUrl: session.url 
+    try {
+      await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL_LIVE}/booking/reservation/session`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookingId, sessionId: session.id, gateway: "stripe" }),
+        },
+      );
+    } catch (linkError) {
+      console.error("Failed to link Stripe session to booking:", linkError);
+    }
+
+    // ✅ Return the checkout URL and session ID
+    return NextResponse.json({
+      checkoutUrl: session.url,
+      sessionId: session.id,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Stripe error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }
     );
   }

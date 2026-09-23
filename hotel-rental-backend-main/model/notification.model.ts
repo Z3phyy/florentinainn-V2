@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system";
+export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system" | "housekeeping";
 export type NotificationAudience = "admin" | "staff" | "all";
 export type NotificationSeverity = "info" | "success" | "warning" | "danger";
 
@@ -24,7 +24,7 @@ const NotificationSchema: Schema = new Schema(
     type: {
       type: String,
       required: true,
-      enum: ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system"],
+      enum: ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping"],
     },
     title: { type: String, required: true },
     message: { type: String, required: true },

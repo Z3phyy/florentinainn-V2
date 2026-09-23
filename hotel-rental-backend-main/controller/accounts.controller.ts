@@ -22,6 +22,8 @@ import { validatePassword, validateEmail } from "../utils/validation";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { getJwtSecret } from "../config/jwt";
+import { sendApprovalEmail, sendRejectionEmail } from "../utils/sendEmail";
+import { PERMISSION_VALUES, PERMISSION_MATRIX } from "../types/permission.type";
 
 const secret = getJwtSecret();
 
@@ -43,6 +45,19 @@ export class AccountController {
     if (typeof accountData.isApproved !== "boolean") {
       accountData.isApproved = false;
     }
+
+    // A public self-registration must never be able to grant itself
+    // permissions or skip the approval queue.
+    if (accountData.isApproved !== true) {
+      accountData.permisions = [];
+    } else if (!Array.isArray(accountData.permisions)) {
+      accountData.permisions = [];
+    }
+
+    accountData.isActive = true;
+    accountData.isSuspended = false;
+    accountData.position =
+      typeof accountData.position === "string" ? accountData.position.trim() : "";
 
     const emailErr = validateEmail(accountData.email);
     if (emailErr) {
@@ -113,6 +128,18 @@ export class AccountController {
     response.send({
       available: !isStaff && !isAdmin,
       takenBy: isAdmin ? "admin" : isStaff ? "staff" : null,
+    });
+  };
+
+  static getPermissionMatrix = async (
+    request: AuthRequest,
+    response: Response,
+  ) => {
+    response.send({
+      permissions: PERMISSION_VALUES.map((value) => ({
+        value,
+        operations: PERMISSION_MATRIX[value] || [],
+      })),
     });
   };
 
@@ -217,11 +244,29 @@ export class AccountController {
           response.status(403).json({ message: "Account is pending approval" });
           return;
         }
+        if (account.isSuspended === true) {
+          response.status(403).json({
+            message: account.suspensionReason
+              ? `Account is suspended: ${account.suspensionReason}`
+              : "Account is suspended",
+          });
+          return;
+        }
+        if (account.isActive === false) {
+          response.status(403).json({ message: "Account is deactivated" });
+          return;
+        }
         const isMatch = await bcrypt.compare(password, account.password);
         if (isMatch) {
           authenticatedAccount = account;
           role = "employee";
         }
+      }
+
+      // Admin account deactivation guard
+      if (authenticatedAccount && adminAccount && adminAccount.isActive === false) {
+        await failAndRespond(403, "Admin account is deactivated");
+        return;
       }
 
       // If neither matched
@@ -231,6 +276,11 @@ export class AccountController {
       }
 
       await LoginAttemptService.reset([emailKey, ipKey]);
+
+      // Track last login + session version (used for force-logout/session revocation)
+      await AccountService.touchLastLogin(authenticatedAccount._id);
+      await AdminService.touchLastLogin(authenticatedAccount._id);
+      const sessionVersion = authenticatedAccount.sessionVersion || 0;
 
       // Create token with id, role, and name
       const token = jwt.sign(
@@ -244,6 +294,7 @@ export class AccountController {
               : role === "admin"
                 ? "Admin"
                 : "Staff"),
+          sv: sessionVersion,
         },
         secret,
         { expiresIn: "3d" },
@@ -268,52 +319,151 @@ export class AccountController {
   };
 
   static getAccounts = async (request: AuthRequest, response: Response) => {
-    const accounts = await AccountService.getAll();
-    response.send(accounts);
+    try {
+      const search =
+        typeof request.query.search === "string" ? request.query.search : "";
+      const status =
+        typeof request.query.status === "string" ? request.query.status : "all";
+      const permission =
+        typeof request.query.permission === "string" ? request.query.permission : "";
+      const hasPaging =
+        request.query.page !== undefined || request.query.limit !== undefined;
+      const page = Number(request.query.page) || 1;
+      const limit = Number(request.query.limit) || 10;
+      const sortField =
+        typeof request.query.sortField === "string"
+          ? request.query.sortField
+          : "name";
+      const sortDir =
+        (request.query.sortDir === "desc" ? "desc" : "asc") as "asc" | "desc";
+
+      const result = await AccountService.list({
+        search,
+        status,
+        permission,
+        page,
+        limit,
+        sortField,
+        sortDir,
+      });
+
+      const sanitize = (doc: any) => {
+        const plain = doc.toObject ? doc.toObject() : { ...doc };
+        delete plain.password;
+        delete plain.otp;
+        delete plain.otpExpiresAt;
+        delete plain.otpAttempts;
+        return plain;
+      };
+
+      if (hasPaging) {
+        response.send({
+          items: (result as { items: any[] }).items.map(sanitize),
+          total: (result as { total: number }).total,
+          page: (result as { page: number }).page,
+          limit: (result as { limit: number }).limit,
+          totalPages: (result as { totalPages: number }).totalPages,
+        });
+        return;
+      }
+
+      const items = result as any[];
+      response.send(items.map(sanitize));
+    } catch (error) {
+      console.error("getAccounts error:", error);
+      response.status(500).send("Server error");
+    }
   };
 
   static updateAccount = async (request: AuthRequest, response: Response) => {
-    const { _id, name, email, password, permisions } = request.body;
-    const updateData: Partial<accountInterfaceInput> = {
-      name,
-      email,
-      permisions,
-      isApproved: true,
-      otp: null,
-    };
-    if (password && typeof password === "string" && password.trim() !== "") {
-      if (/^\$2[aby]\$/.test(password)) {
-        updateData.password = password;
-      } else {
-        updateData.password = await bcrypt.hash(password, 10);
+    try {
+      const { _id, name, email, password, permisions, position } = request.body;
+      const actorType = request.account?.type;
+      const updateData: any = {
+        name,
+        email,
+        isApproved: true,
+        otp: null,
+      };
+
+      if (typeof position === "string") {
+        updateData.position = position.trim();
       }
+
+      // Only super admins may change staff permissions (permission matrix).
+      if (actorType === "super admin" && Array.isArray(permisions)) {
+        updateData.permisions = [...new Set<string>(permisions)];
+      }
+
+      if (password && typeof password === "string" && password.trim() !== "") {
+        if (/^\$2[aby]\$/.test(password)) {
+          updateData.password = password;
+        } else {
+          updateData.password = await bcrypt.hash(password, 10);
+        }
+      }
+
+      await AccountService.update(_id, updateData as accountInterfaceInput);
+      await logAuditAction({
+        action: "STAFF_UPDATED",
+        details: `Updated staff ${name || email}${
+          actorType === "super admin" ? " (incl. permissions)" : ""
+        }`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff updated" });
+    } catch (error) {
+      console.error("updateAccount error:", error);
+      response.status(500).send("Server error");
     }
-    await AccountService.update(_id, updateData as accountInterfaceInput);
-    await logAuditAction({
-      action: "STAFF_UPDATED",
-      details: `Updated staff permissions for ${name || email}`,
-      actorName: request.account?.name || "Administrator",
-      actorRole: request.account?.type || "admin",
-      targetType: "staff",
-      targetId: _id,
-    });
-    const accounts = await AccountService.getAll();
-    response.send(accounts);
   };
 
   static deleteAccount = async (request: AuthRequest, response: Response) => {
-    const { _id } = request.body;
-    await AccountService.delete(_id);
-    await logAuditAction({
-      action: "STAFF_DELETED",
-      details: `Removed staff account ${_id}`,
-      actorName: request.account?.name || "Administrator",
-      actorRole: request.account?.type || "admin",
-      targetType: "staff",
-      targetId: _id,
-    });
-    const accounts = await AccountService.getAll();
-    response.send(accounts);
+    try {
+      const { _id } = request.body;
+      const actorName = request.account?.name || "Administrator";
+      const account = await AccountService.get(_id);
+      if (!account || account.isActive === false) {
+        response.status(400).send({ message: "Staff has already been deactivated" });
+        return;
+      }
+      await AccountService.deactivate(_id, actorName);
+      await logAuditAction({
+        action: "STAFF_DEACTIVATED",
+        details: `Deactivated staff account ${account.name} (${account.email})`,
+        actorName,
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff deactivated" });
+    } catch (error) {
+      console.error("deleteAccount error:", error);
+      response.status(500).send("Server error");
+    }
+  };
+
+  // Hard deletion (super admin only use; normal "delete" is the soft deactivate above)
+  static removeAccountPermanently = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id } = request.body;
+      await AccountService.delete(_id);
+      await logAuditAction({
+        action: "STAFF_DELETED",
+        details: `Permanently removed staff account ${_id}`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff permanently removed" });
+    } catch (error) {
+      console.error("removeAccountPermanently error:", error);
+      response.status(500).send("Server error");
+    }
   };
 
   static approveAccount = async (request: AuthRequest, response: Response) => {
@@ -333,6 +483,15 @@ export class AccountController {
       }
 
       await AccountService.approve(_id);
+
+      if (account.email) {
+        try {
+          await sendApprovalEmail({ to: account.email, email: account.email });
+        } catch (emailError) {
+          console.log("Approval email failed: " + (emailError as Error).message);
+        }
+      }
+
       await logAuditAction({
         action: "STAFF_APPROVED",
         details: `Approved staff access for ${account.name} (${account.email})`,
@@ -364,25 +523,40 @@ export class AccountController {
 
   static rejectAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id, reason } = request.body;
 
       if (!_id) {
         response.status(400).send("Account id is required");
         return;
       }
 
+      const actorName = request.account?.name || "Administrator";
       const account = await AccountService.get(_id);
-
       if (!account) {
         response.status(404).send("Account not found");
         return;
       }
+      if (account.rejectedAt) {
+        response.status(400).send({ message: "Account has already been rejected" });
+        return;
+      }
 
-      await AccountService.delete(_id);
+      if (account.email) {
+        try {
+          await sendRejectionEmail({ to: account.email, email: account.email });
+        } catch (emailError) {
+          console.log("Rejection email failed: " + (emailError as Error).message);
+        }
+      }
+
+      // Soft reject: revoke access, keep the record + reason
+      await AccountService.reject(_id, reason || "", actorName);
       await logAuditAction({
         action: "STAFF_REJECTED",
-        details: `Rejected & removed staff application for ${account.name} (${account.email})`,
-        actorName: request.account?.name || "Administrator",
+        details: `Rejected staff application for ${account.name} (${account.email})${
+          reason ? ` — ${reason}` : ""
+        }`,
+        actorName,
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
@@ -391,20 +565,157 @@ export class AccountController {
       await notify({
         type: "account",
         title: `Staff Application Rejected: ${account.name}`,
-        message: `${account.email} application was rejected.`,
+        message: `${account.email} application was rejected.${
+          reason ? ` Reason: ${reason}` : ""
+        }`,
         severity: "danger",
         link: "/pages/admin/staff",
         targetType: "staff",
         targetId: _id,
       });
 
-      const accounts = await AccountService.getAll();
-      response.send(accounts);
+      response.send({ message: "Staff application rejected" });
     } catch (error) {
       console.log("Failed to reject account: " + (error as Error).message);
       response
         .status(500)
         .send("Failed to reject account: " + (error as Error).message);
+    }
+  };
+
+  static reactivateAccount = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id } = request.body;
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      await AccountService.reactivate(_id);
+      await logAuditAction({
+        action: "STAFF_REACTIVATED",
+        details: `Reactivated staff account ${account.name} (${account.email})`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff reactivated" });
+    } catch (error) {
+      console.error("reactivateAccount error:", error);
+      response.status(500).send("Server error");
+    }
+  };
+
+  static suspendAccount = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id, reason } = request.body;
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (account.isSuspended) {
+        response.status(400).send({ message: "Account is already suspended" });
+        return;
+      }
+      await AccountService.suspend(_id, reason || "", request.account?.name || "Administrator");
+      await logAuditAction({
+        action: "STAFF_SUSPENDED",
+        details: `Suspended staff account ${account.name} (${account.email})${
+          reason ? ` — ${reason}` : ""
+        }`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff suspended" });
+    } catch (error) {
+      console.error("suspendAccount error:", error);
+      response.status(500).send("Server error");
+    }
+  };
+
+  static unsuspendAccount = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id } = request.body;
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      await AccountService.unsuspend(_id);
+      await logAuditAction({
+        action: "STAFF_UNSUSPENDED",
+        details: `Unsuspended staff account ${account.name} (${account.email})`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff unsuspended" });
+    } catch (error) {
+      console.error("unsuspendAccount error:", error);
+      response.status(500).send("Server error");
+    }
+  };
+
+  static forceLogout = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id } = request.body;
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      await AccountService.bumpSessionVersion(_id);
+      await logAuditAction({
+        action: "STAFF_LOGOUT_FORCED",
+        details: `Forced logout for staff account ${account.name} (${account.email})`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff sessions revoked" });
+    } catch (error) {
+      console.error("forceLogout error:", error);
+      response.status(500).send("Server error");
+    }
+  };
+
+  static resetStaffPassword = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id, newPassword } = request.body;
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (!newPassword || typeof newPassword !== "string") {
+        response.status(400).send({ message: "New password is required" });
+        return;
+      }
+      const passErr = validatePassword(newPassword);
+      if (passErr) {
+        response.status(400).json({ message: passErr });
+        return;
+      }
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await AccountService.resetPassword(_id, hashed);
+      await logAuditAction({
+        action: "STAFF_PASSWORD_RESET",
+        details: `Admin reset password for staff account ${account.name} (${account.email})`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+      response.send({ message: "Staff password reset. They will need to log in again." });
+    } catch (error) {
+      console.error("resetStaffPassword error:", error);
+      response.status(500).send("Server error");
     }
   };
 

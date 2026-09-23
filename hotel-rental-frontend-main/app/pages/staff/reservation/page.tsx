@@ -17,10 +17,13 @@ import {
   Mail,
   Phone,
   Wallet,
+  UserX,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { confirmAlert } from "@/app/utils/alert";
 import { formatTime12hr } from "@/app/utils/customFunction";
+import { RescheduleReservationModal } from "./components/rescheduleReservationModal";
+import { BookingHistoryDialog } from "./components/bookingHistoryDialog";
 
 export default function Page() {
   const queryClient = useQueryClient();
@@ -36,7 +39,9 @@ export default function Page() {
   const { data: bookings, isLoading } = useQuery<bookingInterface[]>({
     queryKey: ["reservation-bookings"],
     queryFn: async () => {
-      const res = await axiosInstance.get("/booking");
+      const res = await axiosInstance.get("/booking", {
+        params: { status: "reservation" },
+      });
       const all: bookingInterface[] = res.data;
       return all.filter((b) => b.status === "reservation");
     },
@@ -51,8 +56,19 @@ export default function Page() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: (bookingId: string) =>
-      axiosInstance.post("/booking/reservation/cancel", { bookingId }),
+    mutationFn: ({ bookingId, reason }: { bookingId: string; reason?: string }) =>
+      axiosInstance.post("/booking/reservation/cancel", { bookingId, reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reservation-bookings"] });
+    },
+  });
+
+  const noShowMutation = useMutation({
+    mutationFn: ({ bookingId, reason }: { bookingId: string; reason?: string }) =>
+      axiosInstance.post("/booking/reservation/no-show", {
+        bookingId,
+        reason,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reservation-bookings"] });
     },
@@ -111,9 +127,15 @@ export default function Page() {
               key={booking._id}
               booking={booking}
               onActivate={(id) => activateMutation.mutate(id)}
-              onCancel={(id) => cancelMutation.mutate(id)}
+              onCancel={({ id, reason }) =>
+                cancelMutation.mutate({ bookingId: id, reason })
+              }
+              onNoShow={({ id, reason }) =>
+                noShowMutation.mutate({ bookingId: id, reason })
+              }
               isActivating={activateMutation.isPending}
               isCanceling={cancelMutation.isPending}
+              isNoShowing={noShowMutation.isPending}
               gracePeriodHours={systemInfo?.gracePeriodHours}
             />
           ))}
@@ -129,15 +151,19 @@ function ReservationCard({
   booking,
   onActivate,
   onCancel,
+  onNoShow,
   isActivating,
   isCanceling,
+  isNoShowing,
   gracePeriodHours,
 }: {
   booking: bookingInterface;
   onActivate: (id: string) => void;
-  onCancel: (id: string) => void;
+  onCancel: (params: { id: string; reason?: string }) => void;
+  onNoShow: (params: { id: string; reason?: string }) => void;
   isActivating: boolean;
   isCanceling: boolean;
+  isNoShowing: boolean;
   gracePeriodHours?: number;
 }) {
   const graceHrs = gracePeriodHours ?? 2;
@@ -266,6 +292,7 @@ function ReservationCard({
                 ₱{(room?.price ?? 0).toLocaleString()}/day
               </p>
             </div>
+            <BookingHistoryDialog booking={booking} />
           </div>
 
           <div className="h-px bg-[#D9C3C3]/40 dark:bg-white/10" />
@@ -317,31 +344,50 @@ function ReservationCard({
       </div>
 
       {/* Action Buttons */}
-      <div className="p-5 pt-0 flex gap-2.5">
-        <button
-          onClick={() => {
-            confirmAlert("Are you sure you want to approve this reservation?", "Approve Check-In", () => {
-              onActivate(booking._id);
-            });
-          }}
-          disabled={isActivating || isCanceling}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-[#900546] hover:bg-[#720336] disabled:opacity-50 text-white text-xs font-bold py-2.5 px-3 rounded-xl transition-all shadow-xs cursor-pointer"
-        >
-          <CheckCircle2 className="size-4" />
-          <span>Check-In</span>
-        </button>
-        <button
-          onClick={() => {
-            confirmAlert("Are you sure you want to reject this reservation?", "Reject", () => {
-              onCancel(booking._id);
-            });
-          }}
-          disabled={isActivating || isCanceling}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-[#FAF5F5] dark:bg-[#25121B] border border-[#D9C3C3] dark:border-white/10 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[#5C454B] hover:text-rose-600 text-xs font-semibold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
-        >
-          <XCircle className="size-4" />
-          <span>Cancel</span>
-        </button>
+      <div className="p-5 pt-0 flex flex-col gap-2.5">
+        <div className="flex gap-2.5">
+          <button
+            onClick={() => {
+              confirmAlert("Are you sure you want to approve this reservation?", "Approve Check-In", () => {
+                onActivate(booking._id);
+              });
+            }}
+            disabled={isActivating || isCanceling || isNoShowing}
+            className="flex-1 flex items-center justify-center gap-1.5 bg-[#900546] hover:bg-[#720336] disabled:opacity-50 text-white text-xs font-bold py-2.5 px-3 rounded-xl transition-all shadow-xs cursor-pointer"
+          >
+            <CheckCircle2 className="size-4" />
+            <span>Check-In</span>
+          </button>
+          <RescheduleReservationModal booking={booking} />
+        </div>
+        <div className="flex gap-2.5">
+          <button
+            onClick={() => {
+              confirmAlert("Are you sure you want to reject this reservation?", "Reject", () => {
+                onCancel({ id: booking._id });
+              });
+            }}
+            disabled={isActivating || isCanceling || isNoShowing}
+            className="flex-1 flex items-center justify-center gap-1.5 bg-[#FAF5F5] dark:bg-[#25121B] border border-[#D9C3C3] dark:border-white/10 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[#5C454B] hover:text-rose-600 text-xs font-semibold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
+          >
+            <XCircle className="size-4" />
+            <span>Cancel</span>
+          </button>
+          <button
+            onClick={() => {
+              const reason = window.prompt(
+                "Mark this reservation as no-show? Optionally enter a reason (press OK to confirm, or Cancel to abort).",
+              );
+              if (reason === null) return;
+              onNoShow({ id: booking._id, reason: reason.trim() || undefined });
+            }}
+            disabled={isActivating || isCanceling || isNoShowing}
+            className="flex-1 flex items-center justify-center gap-1.5 bg-[#FAF5F5] dark:bg-[#25121B] border border-[#D9C3C3] dark:border-white/10 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-[#5C454B] hover:text-amber-600 text-xs font-semibold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
+          >
+            <UserX className="size-4" />
+            <span>No-Show</span>
+          </button>
+        </div>
       </div>
     </div>
   );

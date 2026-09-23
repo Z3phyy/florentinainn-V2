@@ -1,10 +1,23 @@
 import BookingsModel from "../model/bookings.model";
-import { bookingInterfaceInput, isWalkInType } from "../types/bookings.type";
+import { bookingInterfaceInput, bookingModification, isWalkInType } from "../types/bookings.type";
 import { RoomService } from "./room.service";
 
 export class BookingService {
-  static async getAll() {
-    const bookings = BookingsModel.find().populate("room");
+  static async getAll(options: { status?: string; search?: string } = {}) {
+    const filter: Record<string, unknown> = {};
+    if (options.status) filter.status = options.status;
+    if (options.search) {
+      const re = {
+        $regex: options.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        $options: "i",
+      };
+      filter.$or = [
+        { clientName: re },
+        { clientPhone: re },
+        { clientEmail: re },
+      ];
+    }
+    const bookings = BookingsModel.find(filter).populate("room");
     return bookings;
   }
 
@@ -23,6 +36,16 @@ export class BookingService {
 
   static async updateStatus(id: string, status: string) {
     await BookingsModel.findByIdAndUpdate(id, { status });
+  }
+
+  static async recordModification(id: string, entry: bookingModification) {
+    await BookingsModel.findByIdAndUpdate(id, {
+      $push: { modificationHistory: entry },
+    });
+  }
+
+  static async setVerificationCode(id: string, code: string) {
+    await BookingsModel.findByIdAndUpdate(id, { verificationCode: code });
   }
 
   static async setPaymentSession(
@@ -194,5 +217,114 @@ export class BookingService {
       { graceNotified: true },
     );
     return !!claimed;
+  }
+
+  // Aggregate all bookings into a guest directory keyed by guest identity.
+  // A guest is identified by the strongest contact we have (email > phone > name).
+  static async getGuestDirectory() {
+    const bookings = await BookingsModel.find().populate("room").sort({ _id: -1 });
+
+    const guests: Map<string, any> = new Map();
+
+    for (const booking of bookings as any[]) {
+      const email = (booking.clientEmail || "").trim().toLowerCase();
+      const phone = (booking.clientPhone || "").trim();
+      const name = (booking.clientName || "").trim();
+
+      const key = email || phone || name;
+      if (!key) continue;
+
+      let guest = guests.get(key);
+      if (!guest) {
+        guest = {
+          key,
+          name,
+          email: email || "",
+          phone,
+          address: booking.clientAddress || "",
+          stays: [],
+          totalStays: 0,
+          totalSpent: 0,
+          outstandingBalance: 0,
+          lastStayAt: null,
+        };
+        guests.set(key, guest);
+      }
+
+      const room = booking.room as any;
+      const nights = Math.max(
+        1,
+        Math.round(
+          (new Date(booking.departureDate || booking.arrivalDate).getTime() -
+            new Date(booking.arrivalDate).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ),
+      );
+      const nightlyRate = Math.round(
+        (room?.price || 0) * (1 - (room?.discount || 0) / 100),
+      );
+      const stayTotal = Math.round(nightlyRate * nights);
+      const amountPaid = Number(booking.paymentAmount) || 0;
+
+      guest.stays.push({
+        bookingId: booking._id,
+        roomId: room?._id,
+        roomNumber: room?.roomNumber || "",
+        category: room?.category || "",
+        type: booking.type,
+        status: booking.status,
+        arrivalDate: booking.arrivalDate,
+        departureDate: booking.departureDate,
+        nights,
+        stayTotal,
+        amountPaid,
+        balance: Math.max(0, stayTotal - amountPaid),
+        createdAt: booking.createdAt,
+      });
+
+      guest.totalStays = guest.stays.length;
+      guest.totalSpent += amountPaid;
+      guest.outstandingBalance = guest.stays
+        .filter(
+          (s: any) => !["canceled", "completed"].includes(s.status),
+        )
+        .reduce((sum: number, s: any) => sum + s.balance, 0);
+
+      const stayDate = booking.createdAt || booking.arrivalDate;
+      if (!guest.lastStayAt || new Date(stayDate) > new Date(guest.lastStayAt)) {
+        guest.lastStayAt = stayDate;
+      }
+    }
+
+    return Array.from(guests.values()).sort(
+      (a, b) =>
+        new Date(b.lastStayAt).getTime() - new Date(a.lastStayAt).getTime(),
+    );
+  }
+
+  static async updateGuestIdentity(
+    match: { clientEmail?: string; clientPhone?: string; clientName?: string },
+    data: {
+      clientName?: string;
+      clientEmail?: string;
+      clientPhone?: string;
+      clientAddress?: string;
+    },
+  ) {
+    const query: any = {};
+    if (match.clientEmail) query.clientEmail = match.clientEmail;
+    else if (match.clientPhone) query.clientPhone = match.clientPhone;
+
+    const update: any = {};
+    if (data.clientName !== undefined) update.clientName = data.clientName;
+    if (data.clientEmail !== undefined) update.clientEmail = data.clientEmail;
+    if (data.clientPhone !== undefined) update.clientPhone = data.clientPhone;
+    if (data.clientAddress !== undefined)
+      update.clientAddress = data.clientAddress;
+
+    if (Object.keys(update).length === 0) return { modifiedCount: 0 };
+
+    const result = await BookingsModel.updateMany(query, { $set: update });
+    return result;
   }
 }

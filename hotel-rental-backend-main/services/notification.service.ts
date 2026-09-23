@@ -14,6 +14,26 @@ export interface CreateNotificationInput {
 
 const ADMIN_AUDIENCES: NotificationAudience[] = ["admin", "all"];
 
+export interface NotificationPrefs {
+  mutedTypes?: string[];
+  mutedSeverities?: string[];
+}
+
+// Excludes notification types/severities the user has muted. Empty prefs
+// (or a non-persisted account) leave the feed completely unfiltered.
+const emptyPrefs = (prefs?: NotificationPrefs) => ({
+  mutedTypes: prefs?.mutedTypes || [],
+  mutedSeverities: prefs?.mutedSeverities || [],
+});
+
+const prefsFilter = (prefs?: NotificationPrefs) => {
+  const { mutedTypes, mutedSeverities } = emptyPrefs(prefs);
+  const filter: Record<string, unknown> = {};
+  if (mutedTypes.length > 0) filter.type = { $nin: mutedTypes };
+  if (mutedSeverities.length > 0) filter.severity = { $nin: mutedSeverities };
+  return filter;
+};
+
 const staffAudienceFilter = (permissions: string[]) => {
   const perms = permissions || [];
   const hasAll = perms.includes("all");
@@ -48,14 +68,20 @@ export class NotificationService {
     return NotificationModel.find().sort({ createdAt: -1 }).limit(limit);
   }
 
-  static async getForAdmin(limit = 100) {
-    return NotificationModel.find({ audience: { $in: ADMIN_AUDIENCES } })
+  static async getForAdmin(prefs?: NotificationPrefs, limit = 100) {
+    return NotificationModel.find({
+      audience: { $in: ADMIN_AUDIENCES },
+      ...prefsFilter(prefs),
+    })
       .sort({ createdAt: -1 })
       .limit(limit);
   }
 
-  static async getForStaff(permissions: string[], limit = 100) {
-    return NotificationModel.find(staffAudienceFilter(permissions))
+  static async getForStaff(permissions: string[], prefs?: NotificationPrefs, limit = 100) {
+    return NotificationModel.find({
+      ...staffAudienceFilter(permissions),
+      ...prefsFilter(prefs),
+    })
       .sort({ createdAt: -1 })
       .limit(limit);
   }
@@ -68,24 +94,44 @@ export class NotificationService {
     return NotificationModel.countDocuments({ read: false });
   }
 
-  static async getUnreadCountForAdmin() {
-    return NotificationModel.countDocuments({ read: false, audience: { $in: ADMIN_AUDIENCES } });
+  static async getUnreadCountForAdmin(prefs?: NotificationPrefs) {
+    return NotificationModel.countDocuments({
+      read: false,
+      audience: { $in: ADMIN_AUDIENCES },
+      ...prefsFilter(prefs),
+    });
   }
 
-  static async getUnreadCountForStaff(permissions: string[]) {
-    return NotificationModel.countDocuments({ read: false, ...staffAudienceFilter(permissions) });
+  static async getUnreadCountForStaff(permissions: string[], prefs?: NotificationPrefs) {
+    return NotificationModel.countDocuments({
+      read: false,
+      ...staffAudienceFilter(permissions),
+      ...prefsFilter(prefs),
+    });
   }
 
-  static async countByType() {
+  static async countByType(prefs?: NotificationPrefs) {
     return NotificationModel.aggregate<{ _id: string; count: number }>([
-      { $match: { read: false, audience: { $in: ADMIN_AUDIENCES } } },
+      {
+        $match: {
+          read: false,
+          audience: { $in: ADMIN_AUDIENCES },
+          ...prefsFilter(prefs),
+        },
+      },
       { $group: { _id: "$type", count: { $sum: 1 } } },
     ]);
   }
 
-  static async countByTypeForStaff(permissions: string[]) {
+  static async countByTypeForStaff(permissions: string[], prefs?: NotificationPrefs) {
     return NotificationModel.aggregate<{ _id: string; count: number }>([
-      { $match: { read: false, ...staffAudienceFilter(permissions) } },
+      {
+        $match: {
+          read: false,
+          ...staffAudienceFilter(permissions),
+          ...prefsFilter(prefs),
+        },
+      },
       { $group: { _id: "$type", count: { $sum: 1 } } },
     ]);
   }

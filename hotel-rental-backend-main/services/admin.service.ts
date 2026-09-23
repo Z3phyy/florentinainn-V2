@@ -77,4 +77,20 @@ export class AdminService {
     const admin = await AdminModel.findByIdAndUpdate(id, { $set: data }, { new: true });
     return admin;
   }
+
+  static async touchLastLogin(id: string) {
+    await AdminModel.findByIdAndUpdate(id, { lastLogin: new Date() });
+  }
+
+  static async setActive(id: string, isActive: boolean) {
+    await AdminModel.findByIdAndUpdate(id, {
+      isActive,
+      ...(isActive ? {} : { $inc: { sessionVersion: 1 } }),
+    });
+  }
+
+  static async getAllAdmins() {
+    const admins = AdminModel.find().select("-password -otp -otpExpiresAt -otpAttempts");
+    return admins;
+  }
 }

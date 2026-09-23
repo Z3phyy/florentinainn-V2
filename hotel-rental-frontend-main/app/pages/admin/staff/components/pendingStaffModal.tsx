@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
-import { accountInterface } from "@/app/types/account.type";
+import { accountInterface, accountListResult } from "@/app/types/account.type";
 import { successAlert, errorAlert, confirmAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,46 +21,73 @@ export function PendingStaffModal() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["staff"],
-    queryFn: async (): Promise<accountInterface[]> => {
-      const response = await axiosInstance.get("/account");
+  const { data, isLoading, isError } = useQuery<accountListResult | accountInterface[]>({
+    queryKey: ["staff", "pending"],
+    queryFn: async () => {
+      const response = await axiosInstance.get("/account", {
+        params: { status: "pending", limit: 100 },
+      });
       return response.data;
     },
   });
 
-  const pendingStaff = data?.filter((staff) => staff.isApproved === false) ?? [];
+  const pendingStaff =
+    (Array.isArray(data) ? data : data?.items ?? []).filter(
+      (staff) => staff.isApproved === false && !staff.rejectedAt,
+    ) ?? [];
 
   const approveMutation = useMutation({
     mutationFn: (_id: string) => axiosInstance.put("/account/approve", { _id }),
     onSuccess: () => {
       successAlert("Staff account approved.");
       queryClient.invalidateQueries({ queryKey: ["staff"] });
+      setOpen(false);
     },
-    onError: (err: { response?: { data?: string } }) => {
+    onError: (err: { response?: { data?: string | { message?: string } } }) => {
+      const raw = err.response?.data;
       const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to approve staff account.";
+        typeof raw === "string" ? raw : raw?.message || "Failed to approve staff account.";
       errorAlert(message);
     },
   });
 
   const rejectMutation = useMutation({
-    mutationFn: (_id: string) =>
-      axiosInstance.delete("/account/reject", { data: { _id } }),
+    mutationFn: ({ _id, reason }: { _id: string; reason: string }) =>
+      axiosInstance.delete("/account/reject", { data: { _id, reason } }),
     onSuccess: () => {
       successAlert("Staff account rejected.");
       queryClient.invalidateQueries({ queryKey: ["staff"] });
+      setOpen(false);
     },
-    onError: (err: { response?: { data?: string } }) => {
+    onError: (err: { response?: { data?: string | { message?: string } } }) => {
+      const raw = err.response?.data;
       const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to reject staff account.";
+        typeof raw === "string" ? raw : raw?.message || "Failed to reject staff account.";
       errorAlert(message);
     },
   });
+
+  const handleReject = (staff: accountInterface) => {
+    const reason = window.prompt(
+      `Reason for rejecting "${staff.name}"? (optional)`,
+      "",
+    );
+    if (reason === null) return;
+    confirmAlert(
+      `Reject "${staff.name}"? Their access request will be closed.`,
+      "Reject",
+      () => rejectMutation.mutate({ _id: staff._id, reason: reason.trim() }),
+    );
+  };
+
+  const handleApprove = (staff: accountInterface) => {
+    setOpen(false);
+    confirmAlert(
+      `Approve "${staff.name}"?`,
+      "Approve",
+      () => approveMutation.mutate(staff._id),
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -115,18 +142,7 @@ export function PendingStaffModal() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() =>{
-                       setOpen(false)
-                      confirmAlert(
-                        `Approve "${staff.name}"?`,
-                        "Approve",
-                        () => approveMutation.mutate(staff._id)
-                      )
-
-                    }
-                      
-                    
-                    }
+                    onClick={() => handleApprove(staff)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                   >
                     {approveMutation.isPending ? (
@@ -138,16 +154,7 @@ export function PendingStaffModal() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => {
-                      setOpen(false)
-                      confirmAlert(
-                        `Reject and delete "${staff.name}"?`,
-                        "Reject",
-                        () => rejectMutation.mutate(staff._id)
-                      )
-                    }
-                      
-                    }
+                    onClick={() => handleReject(staff)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                   >
                     <X className="size-3.5 text-destructive" />

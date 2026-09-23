@@ -2,24 +2,31 @@ import { Router } from "express";
 import { SystemController } from "../controller/system.controller";
 import { upload } from "../utils/upload";
 import { authenticateJWT, authenticateChatSender } from "../middleware/auth";
-import { requireAdmin } from "../middleware/requireAdmin";
+import { requireAdmin, requireSuperAdmin, requirePermission } from "../middleware/requireAdmin";
 import { attachTokenFromQuery } from "../middleware/sseAuth";
-import { authLimiter, otpLimiter } from "../config/rateLimit";
+import { authLimiter, otpLimiter, aiLimiter } from "../config/rateLimit";
 
 const route = Router()
 
 const adminAuth = [authenticateJWT, requireAdmin];
+const superAdminAuth = [authenticateJWT, requireSuperAdmin];
 
-route.post("/ai", SystemController.aiChatBot)
+route.post("/ai", aiLimiter, SystemController.aiChatBot)
 route.post("/ai-suggest-reply", authenticateJWT, SystemController.aiSuggestReply)
 route.post("/ai-forecast", authenticateJWT, SystemController.aiForecastSuggestions)
 route.get("/", SystemController.getSystemInfo)
 route.get("/payments", adminAuth, SystemController.getAllPayments)
+route.post("/payments/refund", authenticateJWT, requirePermission("payments"), SystemController.refundPayment)
+route.post("/payments/restore", adminAuth, SystemController.restorePayment)
 route.put("/info", adminAuth, SystemController.updateSystemInfo)
 route.post("/logo", adminAuth, upload.single("logo"), SystemController.uploadLogo)
 route.post("/image", adminAuth, upload.single("image"), SystemController.uploadSystemImage)
+route.get("/backup", superAdminAuth, SystemController.createBackup)
+route.post("/backup/restore", superAdminAuth, SystemController.restoreBackup)
 route.post("/admin", authLimiter, SystemController.createAdmin)
 route.get("/admin/status", SystemController.checkAdminRegistrationStatus)
+route.get("/admins", superAdminAuth, SystemController.getAdmins)
+route.put("/admin/status", superAdminAuth, SystemController.toggleAdminActive)
 route.put("/admin/change-credentials", adminAuth, SystemController.changeAdminCredentials)
 route.post("/forgot-password/send-otp", otpLimiter, SystemController.sendForgotPasswordOtp)
 route.post("/forgot-password/verify-otp", otpLimiter, SystemController.verifyForgotPasswordOtp)
@@ -33,6 +40,12 @@ route.get("/notifications/stream", attachTokenFromQuery, adminAuth, SystemContro
 route.get("/notifications/staff/stream", attachTokenFromQuery, authenticateJWT, SystemController.streamStaffNotifications)
 route.put("/notifications/read-all", adminAuth, SystemController.markAllNotificationsRead)
 route.put("/notifications/staff/read-all", authenticateJWT, SystemController.markAllStaffNotificationsRead)
+// Note: literal staff/prefs routes must be declared BEFORE the generic "/:id"
+// routes so "notifications/prefs" is not captured by "/notifications/:id".
+route.get("/notifications/prefs", adminAuth, SystemController.getNotificationPrefs)
+route.get("/notifications/staff/prefs", authenticateJWT, SystemController.getNotificationPrefsStaff)
+route.put("/notifications/prefs", adminAuth, SystemController.updateNotificationPrefs)
+route.put("/notifications/staff/prefs", authenticateJWT, SystemController.updateNotificationPrefsStaff)
 route.put("/notifications/:id/read", adminAuth, SystemController.markNotificationAsRead)
 // Note: literal staff routes must be declared BEFORE the generic "/:id" routes,
 // otherwise DELETE /notifications/staff is captured by /notifications/:id and rejected

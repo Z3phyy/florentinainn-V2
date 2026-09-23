@@ -22,6 +22,7 @@ import {
   History,
   UserRound,
   CalendarDays,
+  SprayCan,
 } from "lucide-react";
 import {
   Sidebar,
@@ -53,6 +54,11 @@ const navigationItems = [
     title: "Rooms & Suites",
     url: "/pages/admin/rooms",
     icon: BedDouble,
+  },
+  {
+    title: "Housekeeping",
+    url: "/pages/admin/housekeeping",
+    icon: SprayCan,
   },
   {
     title: "Availability",

@@ -8,6 +8,7 @@ import { NotificationResponse } from "@/app/types/notification.type";
 import useUserStore from "@/app/store/useUserStore";
 import { formatAlertTimeAgo } from "@/app/utils/formatTime";
 import useNotificationStream from "@/app/hooks/useNotificationStream";
+import { NotificationPreferences } from "@/components/ui/notificationPreferences";
 import {
   Bell,
   ChevronRight,
@@ -20,6 +21,7 @@ import {
   Sparkles,
   Inbox,
   X,
+  SprayCan,
 } from "lucide-react";
 
 function getItemIcon(type: string) {
@@ -30,6 +32,8 @@ function getItemIcon(type: string) {
       return <Calendar className="size-4" />;
     case "maintenance":
       return <Wrench className="size-4" />;
+    case "housekeeping":
+      return <SprayCan className="size-4" />;
     case "chat":
     default:
       return <MessageSquare className="size-4" />;
@@ -44,6 +48,8 @@ function getItemBadgeStyle(type: string) {
       return "bg-[#900546]/10 text-[#900546] dark:text-[#F968AC]";
     case "maintenance":
       return "bg-amber-500/10 text-amber-600 dark:text-amber-400";
+    case "housekeeping":
+      return "bg-sky-500/10 text-sky-600 dark:text-sky-400";
     case "chat":
     default:
       return "bg-[#618685]/15 text-[#618685] dark:text-[#88afae]";
@@ -218,14 +224,29 @@ export function StaffNotificationBell() {
               Open Guest Messages
               <ChevronRight className="size-3" />
             </Link>
-            <button
-              onClick={() => clearNotifications()}
-              disabled={(notifications?.items?.length || 0) === 0 || isClearing}
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-rose-600 bg-white dark:bg-[#130005] border border-rose-200 dark:border-rose-900/40 px-3 py-1.5 rounded-lg hover:bg-rose-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {isClearing ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-              Clear Alerts
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <NotificationPreferences
+                  endpoint="/system/notifications/staff/prefs"
+                  onSaved={() =>
+                    queryClient.invalidateQueries({
+                      queryKey: ["staff-notifications"],
+                    })
+                  }
+                />
+                <span className="text-[11px] font-semibold text-[#5C454B] dark:text-gray-400">
+                  Preferences
+                </span>
+              </div>
+              <button
+                onClick={() => clearNotifications()}
+                disabled={(notifications?.items?.length || 0) === 0 || isClearing}
+                className="inline-flex items-center gap-1.5 text-[11px] font-bold text-rose-600 bg-white dark:bg-[#130005] border border-rose-200 dark:border-rose-900/40 px-3 py-1.5 rounded-lg hover:bg-rose-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {isClearing ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                Clear Alerts
+              </button>
+            </div>
           </div>
         </div>
       )}

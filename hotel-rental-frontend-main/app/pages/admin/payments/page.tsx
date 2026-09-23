@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { paymentInterface } from "@/app/types/payment.type";
@@ -50,6 +50,7 @@ import {
   Printer,
   Download,
   FileSpreadsheet,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -65,6 +66,7 @@ import {
   RECEIPT_PAGE_CSS,
   ReceiptData,
 } from "@/app/utils/receiptTemplate";
+import { RefundPaymentModal } from "./components/refundPaymentModal";
 
 type DatePreset = "all" | "today" | "week" | "month" | "custom";
 type SortOption = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
@@ -115,15 +117,23 @@ function formatCurrency(amount: number) {
 }
 
 export default function Page() {
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
   const {
     data: payments = [],
     isLoading,
     isError,
   } = useQuery<paymentInterface[]>({
-    queryKey: ["payments"],
+    queryKey: ["payments", debouncedSearch],
     queryFn: async () => {
-      const res = await axiosInstance.get("/system/payments");
-      return res.data || [];
+      const res = await axiosInstance.get("/system/payments", {
+        params: {
+          limit: 500,
+          page: 1,
+          search: debouncedSearch || undefined,
+        },
+      });
+      return res.data?.items || [];
     },
   });
 
@@ -146,6 +156,18 @@ export default function Page() {
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Server-side search debounce (mirrors the staff page pattern) so the
+  // unbounded ledger is never fully downloaded on every keystroke.
+  const searchTimer = useRef<number | undefined>(undefined);
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+    setCurrentPage(1);
+    window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => {
+      setDebouncedSearch(value);
+    }, 350);
+  };
 
   const [selectedPayment, setSelectedPayment] =
     useState<paymentInterface | null>(null);
@@ -341,6 +363,7 @@ export default function Page() {
 
   const resetFilters = () => {
     setSearchQuery("");
+    setDebouncedSearch("");
     setDatePreset("all");
     setMethodFilter("all");
     setSortBy("date-desc");
@@ -563,16 +586,13 @@ export default function Page() {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search by Guest Name, Cashier / Staff, Reference No., or Payment ID..."
               className="pl-10 pr-9 h-10 text-xs bg-muted/30 border-border focus:bg-background rounded-lg"
             />
             {searchQuery && (
               <button
-                onClick={() => setSearchQuery("")}
+                onClick={() => handleSearch("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X className="size-3.5" />
@@ -896,6 +916,16 @@ export default function Page() {
                             <span>Online</span>
                           </span>
                         )}
+
+                        {payment.status === "refunded" && (
+                          <span
+                            className="ml-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                            title={payment.refundReason || "Refunded payment"}
+                          >
+                            <RotateCcw className="size-3 shrink-0" />
+                            <span>Refunded</span>
+                          </span>
+                        )}
                       </TableCell>
 
                       {/* Cashier / Received By */}
@@ -923,18 +953,21 @@ export default function Page() {
                         )}
                       </TableCell>
 
-                      {/* Print Receipt Action Button */}
+                      {/* Print Receipt / Refund Action Button */}
                       <TableCell className="text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedPayment(payment)}
-                          className="h-7 px-2 text-[11px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
-                          title="View & Print Official Receipt"
-                        >
-                          <Printer className="size-3 text-primary" />
-                          <span>Receipt</span>
-                        </Button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedPayment(payment)}
+                            className="h-7 px-2 text-[11px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
+                            title="View & Print Official Receipt"
+                          >
+                            <Printer className="size-3 text-primary" />
+                            <span>Receipt</span>
+                          </Button>
+                          <RefundPaymentModal payment={payment} />
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

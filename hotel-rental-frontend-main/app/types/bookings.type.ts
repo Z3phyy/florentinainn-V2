@@ -1,5 +1,14 @@
 import { roomInterface } from "./room.type"
 
+export interface bookingModification {
+  field: string;
+  from?: string;
+  to?: string;
+  note?: string;
+  changedBy?: string;
+  changedAt?: string;
+}
+
 export interface bookingInterfaceInput {
     clientName: string,
     clientAddress: string,
@@ -38,5 +47,15 @@ export interface bookingInterface  {
     arrivalDate: string,
     departureDate?: string,
     arrivalTime: string,
+    noShowAt?: string | null,
+    noShowBy?: string,
+    noShowReason?: string,
+    canceledAt?: string | null,
+    canceledBy?: string,
+    cancellationReason?: string,
+    checkedOutAt?: string | null,
+    earlyCheckout?: boolean,
+    wasRescheduled?: boolean,
+    modificationHistory?: bookingModification[],
     room : roomInterface,
 }

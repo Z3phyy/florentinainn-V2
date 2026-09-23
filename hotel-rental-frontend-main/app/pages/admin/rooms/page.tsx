@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { AddRoomModal } from "./components/addRoomModal";
 import { EditRoomModal } from "./components/editRoomModal";
 import { UploadImagesModal } from "./components/uploadImagesModal";
+import { MaintenanceModal } from "./components/maintenanceModal";
 import {
   Dialog,
   DialogContent,
@@ -32,7 +33,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   Trash2,
-  Wrench,
   Percent,
   Loader2,
   Search,
@@ -228,7 +228,6 @@ export default function Page() {
                   <div className="flex items-center justify-end gap-1">
                     {/* Maintenance toggle */}
                     <div className="flex items-center gap-1.5 px-2">
-                      <Wrench className="size-3 text-muted-foreground" />
                       <Switch
                         size="sm"
                         checked={room.status === "maintenance"}
@@ -236,6 +235,8 @@ export default function Page() {
                         onCheckedChange={() => toggleMaintenanceMutation.mutate(room._id)}
                       />
                     </div>
+                    {/* Maintenance details modal */}
+                    <MaintenanceModal room={room} />
                     {/* Discount button */}
                     <Button
                       variant="ghost"

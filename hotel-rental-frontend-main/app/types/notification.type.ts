@@ -1,4 +1,4 @@
-export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system";
+export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system" | "housekeeping";
 export type NotificationSeverity = "info" | "success" | "warning" | "danger";
 
 export interface NotificationItem {
@@ -11,6 +11,11 @@ export interface NotificationItem {
   read: boolean;
   timestamp: string;
   link: string;
+}
+
+export interface NotificationPrefs {
+  mutedTypes: string[];
+  mutedSeverities: string[];
 }
 
 export interface NotificationResponse {
@@ -30,6 +35,6 @@ export interface AuditLog {
   actorRole: string;
   targetType: string;
   targetId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }

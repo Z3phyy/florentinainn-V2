@@ -61,14 +61,30 @@ export class RoomController {
       }
 
       // Build room data from form fields, converting stringified arrays
+      const parsedPrice = Number(request.body.price);
+      const parsedDiscount = Number(request.body.discount || 0);
+      const parsedMaxHead = Number(request.body.maxHead || 1);
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+        response.status(400).send("Invalid room price");
+        return;
+      }
+      if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0 || parsedDiscount > 100) {
+        response.status(400).send("Invalid discount (0-100)");
+        return;
+      }
+      if (!Number.isFinite(parsedMaxHead) || parsedMaxHead < 1) {
+        response.status(400).send("Invalid max occupancy");
+        return;
+      }
+
       const roomData: roomInterfaceInput = {
         roomNumber: request.body.roomNumber || "",
         category: request.body.category,
         amenities: parseArrayField(request.body.amenities),
         bedding: parseArrayField(request.body.bedding),
-        price: Number(request.body.price),
-        maxHead: request.body.maxHead,
-        discount: Number(request.body.discount),
+        price: parsedPrice,
+        maxHead: parsedMaxHead,
+        discount: parsedDiscount,
         image: imageUrl || request.body.image,
         description: request.body.description,
         images: typeof request.body.images === "string"
@@ -208,13 +224,47 @@ export class RoomController {
 
   static toggleMaintenance = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id, reason, assignedMaintainer, notes } = request.body;
       const room = await RoomService.get(_id);
+      if (!room) {
+        response.status(404).send("Room not found");
+        return;
+      }
       const roomLabel = getRoomLabel(room);
-      const newStatus = await RoomService.toggleMaintenance(_id);
+
+      if (room.status === "maintenance" && (reason || assignedMaintainer)) {
+        // Room already flagged — update maintenance details without toggling status.
+        await RoomService.updateMaintenanceDetails(_id, {
+          reason,
+          assignedMaintainer,
+          notes,
+          changedBy: request.account?.name || "Administrator",
+        });
+        await logAuditAction({
+          action: "MAINTENANCE_DETAILS_UPDATED",
+          details: `Updated maintenance details for ${roomLabel}${assignedMaintainer ? ` assigned to ${assignedMaintainer}` : ""}`,
+          actorName: request.account?.name || "Administrator",
+          actorRole: request.account?.type || "admin",
+          targetType: "room",
+          targetId: _id,
+        });
+        const rooms = await RoomService.getAll();
+        response.send(rooms);
+        return;
+      }
+
+      const newStatus = await RoomService.toggleMaintenance(_id, {
+        reason,
+        assignedMaintainer,
+        notes,
+        changedBy: request.account?.name || "Administrator",
+      });
       await logAuditAction({
         action: "MAINTENANCE_TOGGLED",
-        details: `Toggled room status for ${roomLabel} to ${newStatus}`,
+        details:
+          newStatus === "maintenance"
+            ? `Flagged ${roomLabel} for maintenance${reason ? `: ${reason}` : ""}${assignedMaintainer ? ` (assigned to ${assignedMaintainer})` : ""}`
+            : `Marked ${roomLabel} maintenance as resolved`,
         actorName: request.account?.name || "Administrator",
         actorRole: request.account?.type || "admin",
         targetType: "room",
@@ -226,8 +276,18 @@ export class RoomController {
         await notify({
           type: "maintenance",
           title: `Room Maintenance Required: ${roomLabel}`,
-          message: `${roomLabel} has been flagged for maintenance.`,
+          message: `${roomLabel} has been flagged for maintenance${reason ? ` (${reason})` : ""}${assignedMaintainer ? `.\nAssigned to ${assignedMaintainer}` : "."}`,
           severity: "warning",
+          link: "/pages/admin/rooms",
+          targetType: "room",
+          targetId: _id,
+        });
+      } else {
+        await notify({
+          type: "maintenance",
+          title: `Maintenance Resolved: ${roomLabel}`,
+          message: `${roomLabel} is back and available for booking.`,
+          severity: "success",
           link: "/pages/admin/rooms",
           targetType: "room",
           targetId: _id,
@@ -301,6 +361,138 @@ export class RoomController {
     } catch (error) {
       console.log("Failed to delete room image: " + (error as Error).message);
       response.status(500).send("Failed to delete image: " + (error as Error).message);
+    }
+  };
+
+  static updateHousekeeping = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id, housekeepingStatus, assignedHousekeeper, housekeepingNotes } =
+        request.body;
+      if (!_id) {
+        response.status(400).send("Room ID is required");
+        return;
+      }
+      if (!housekeepingStatus) {
+        response.status(400).send("Housekeeping status is required");
+        return;
+      }
+
+      const room = await RoomService.get(_id);
+      if (!room) {
+        response.status(404).send("Room not found");
+        return;
+      }
+
+      const updated = await RoomService.updateHousekeeping(_id, {
+        housekeepingStatus,
+        assignedHousekeeper,
+        housekeepingNotes,
+        changedBy: request.account?.name || "Administrator",
+      });
+
+      const roomLabel = getRoomLabel(room);
+      await logAuditAction({
+        action: "HOUSEKEEPING_UPDATED",
+        details: `Updated housekeeping for ${roomLabel} from "${room.housekeepingStatus || "clean"}" to "${housekeepingStatus}${assignedHousekeeper ? ` assigned to ${assignedHousekeeper}` : ""}"`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "room",
+        targetId: _id,
+      });
+
+      if (housekeepingStatus === "cleaning") {
+        await notify({
+          type: "housekeeping",
+          title: `Housekeeping In Progress: ${roomLabel}`,
+          message: `${roomLabel} is being cleaned${assignedHousekeeper ? ` by ${assignedHousekeeper}` : ""}.`,
+          severity: "info",
+          link: "/pages/admin/rooms",
+          targetType: "room",
+          targetId: _id,
+        });
+      } else if (housekeepingStatus === "clean" || housekeepingStatus === "inspected") {
+        await notify({
+          type: "housekeeping",
+          title: `${roomLabel} Ready`,
+          message: `${roomLabel} has been marked ${housekeepingStatus}.`,
+          severity: "success",
+          link: "/pages/admin/rooms",
+          targetType: "room",
+          targetId: _id,
+        });
+      }
+
+      const rooms = await RoomService.getAll();
+      response.send(rooms);
+    } catch (error) {
+      console.log("Failed to update housekeeping: " + (error as Error).message);
+      response.status(400).send((error as Error).message);
+    }
+  };
+
+  static markHousekeepingDirty = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id, note } = request.body;
+      if (!_id) {
+        response.status(400).send("Room ID is required");
+        return;
+      }
+      const room = await RoomService.get(_id);
+      if (!room) {
+        response.status(404).send("Room not found");
+        return;
+      }
+      await RoomService.markHousekeepingDirty(
+        _id,
+        request.account?.name || "Administrator",
+        note,
+      );
+      const roomLabel = getRoomLabel(room);
+      await logAuditAction({
+        action: "HOUSEKEEPING_DIRTY",
+        details: `Marked ${roomLabel} as dirty for cleaning${note ? ` (${note})` : ""}`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "room",
+        targetId: _id,
+      });
+      const rooms = await RoomService.getAll();
+      response.send(rooms);
+    } catch (error) {
+      console.log("Failed to mark housekeeping dirty: " + (error as Error).message);
+      response.status(500).send("Failed to update housekeeping: " + (error as Error).message);
+    }
+  };
+
+  static getHousekeepingReport = async (request: AuthRequest, response: Response) => {
+    try {
+      const rooms = await RoomService.getAll();
+      const report = rooms.map((room: any) => ({
+        _id: room._id,
+        roomNumber: room.roomNumber,
+        category: room.category,
+        status: room.status,
+        housekeepingStatus: room.housekeepingStatus || "clean",
+        assignedHousekeeper: room.assignedHousekeeper || "",
+        housekeepingStartedAt: room.housekeepingStartedAt || null,
+        housekeepingUpdatedAt: room.housekeepingUpdatedAt || null,
+        housekeepingNotes: room.housekeepingNotes || "",
+        housekeepingHistory: room.housekeepingHistory || [],
+      }));
+
+      const summary = {
+        total: report.length,
+        clean: report.filter((r: any) => r.housekeepingStatus === "clean").length,
+        dirty: report.filter((r: any) => r.housekeepingStatus === "dirty").length,
+        cleaning: report.filter((r: any) => r.housekeepingStatus === "cleaning").length,
+        inspected: report.filter((r: any) => r.housekeepingStatus === "inspected").length,
+        outOfService: report.filter((r: any) => r.housekeepingStatus === "out-of-service").length,
+      };
+
+      response.send({ rooms: report, summary });
+    } catch (error) {
+      console.log("Failed to get housekeeping report: " + (error as Error).message);
+      response.status(500).send("Failed to get housekeeping report: " + (error as Error).message);
     }
   };
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { systemInterface } from "@/app/types/system.type";
+import useUserStore from "@/app/store/useUserStore";
 import { successAlert, errorAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,10 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LogoUploadModal } from "@/components/ui/logoUploadModal";
 import { SystemImageUploadModal } from "@/components/ui/systemImageUploadModal";
+import { AdminAccounts } from "./components/adminAccounts";
+import { BackupRestore } from "./components/backupRestore";
 import { Loader2, Save, Building2, Sparkles, Layout } from "lucide-react";
 
 export default function Page() {
   const queryClient = useQueryClient();
+  const { user } = useUserStore();
 
   const { data: systemInfo, isLoading, isError } = useQuery<systemInterface>({
     queryKey: ["systeminfo"],
@@ -385,6 +389,13 @@ export default function Page() {
                 )}
               </div>
             </form>
+
+            {user?.type === "super admin" && (
+              <>
+                <AdminAccounts />
+                <BackupRestore />
+              </>
+            )}
           </div>
         </div>
       )}

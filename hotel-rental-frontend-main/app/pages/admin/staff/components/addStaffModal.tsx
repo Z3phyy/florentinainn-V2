@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
+import { permissionOption } from "@/app/types/account.type";
 import { successAlert, errorAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -19,30 +21,35 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, UserPlus } from "lucide-react";
 
-const PERMISSION_OPTIONS = [
-  { label: "Frontdesk Management", value: "frontdesk management" },
-  { label: "Reservation Management", value: "reservation management" },
-  { label: "Room Management", value: "room management" },
-  { label: "Chat Management", value: "chat management" },
-  { label: "Availability Management", value: "availability management" },
-];
-
 export function AddStaffModal() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [position, setPosition] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [permisions, setPermisions] = useState<string[]>([]);
 
+  const { data: permissionData } = useQuery({
+    queryKey: ["permission-matrix"],
+    enabled: open,
+    queryFn: async (): Promise<{ permissions: permissionOption[] }> => {
+      const res = await axiosInstance.get("/account/permissions");
+      return res.data;
+    },
+  });
+
+  const permissionOptions = permissionData?.permissions ?? [];
+
   const addStaffMutation = useMutation({
-    mutationFn: (data: { name: string; email: string; password: string; permisions: string[], isApproved : boolean }) =>
+    mutationFn: (data: { name: string; position: string; email: string; password: string; permisions: string[], isApproved : boolean }) =>
       axiosInstance.post("/account", data),
     onSuccess: () => {
       successAlert("Staff member added successfully.");
       queryClient.invalidateQueries({ queryKey: ["staff"] });
       setOpen(false);
       setName("");
+      setPosition("");
       setEmail("");
       setPassword("");
       setPermisions([]);
@@ -62,7 +69,7 @@ export function AddStaffModal() {
       errorAlert("Please fill in all required fields.");
       return;
     }
-    addStaffMutation.mutate({ name, email, password, permisions , isApproved : true});
+    addStaffMutation.mutate({ name, position, email, password, permisions , isApproved : true});
   };
 
   const togglePermission = (value: string) => {
@@ -102,6 +109,17 @@ export function AddStaffModal() {
             />
           </div>
 
+          {/* Position */}
+          <div className="space-y-2">
+            <Label htmlFor="position">Position / Designation</Label>
+            <Input
+              id="position"
+              placeholder="Front Desk Receptionist"
+              value={position}
+              onChange={(e) => setPosition(e.target.value)}
+            />
+          </div>
+
           {/* Username */}
           <div className="space-y-2">
             <Label htmlFor="username">Email</Label>
@@ -131,20 +149,29 @@ export function AddStaffModal() {
           {/* Permissions */}
           <div className="space-y-3">
             <Label>Permissions</Label>
-            <div className="space-y-2">
-              {PERMISSION_OPTIONS.map((perm) => (
-                <div
-                  key={perm.value}
-                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
-                >
-                  <span className="text-sm">{perm.label}</span>
-                  <Switch
-                    checked={permisions.includes(perm.value)}
-                    onCheckedChange={() => togglePermission(perm.value)}
-                  />
-                </div>
-              ))}
-            </div>
+            {permissionOptions.length === 0 ? (
+              <Skeleton className="h-8 w-full" />
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {permissionOptions.map((perm) => (
+                  <div
+                    key={perm.value}
+                    className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
+                  >
+                    <div>
+                      <span className="text-sm">{perm.value}</span>
+                      <p className="text-[11px] text-muted-foreground">
+                        {perm.operations.join(", ")}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={permisions.includes(perm.value)}
+                      onCheckedChange={() => togglePermission(perm.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <DialogFooter>

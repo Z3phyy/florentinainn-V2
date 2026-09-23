@@ -1,5 +1,17 @@
 import mongoose, { Schema } from "mongoose";
 
+const BookingModificationSchema = new Schema(
+  {
+    field: { type: String, required: true },
+    from: { type: String, default: "" },
+    to: { type: String, default: "" },
+    note: { type: String, default: "" },
+    changedBy: { type: String, default: "" },
+    changedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const BookingsSchema = new Schema({
   clientName: { type: String, required: true },
   clientAddress: { type: String, required: true },
@@ -22,6 +34,17 @@ const BookingsSchema = new Schema({
   arrivalNotified: { type: Boolean, default: false },
   overdueNotified: { type: Boolean, default: false },
   graceNotified: { type: Boolean, default: false },
+  noShowAt: { type: Date, default: null },
+  noShowBy: { type: String, default: "" },
+  noShowReason: { type: String, default: "" },
+  canceledAt: { type: Date, default: null },
+  canceledBy: { type: String, default: "" },
+  cancellationReason: { type: String, default: "" },
+  checkedOutAt: { type: Date, default: null },
+  earlyCheckout: { type: Boolean, default: false },
+  wasRescheduled: { type: Boolean, default: false },
+  verificationCode: { type: String, default: "" },
+  modificationHistory: { type: [BookingModificationSchema], default: [] },
   room: {
     type: Schema.Types.ObjectId,
     ref: "Rooms",

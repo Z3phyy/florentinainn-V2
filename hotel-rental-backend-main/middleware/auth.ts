@@ -22,9 +22,35 @@ const buildStaffAccount = (
   password: "",
   email: accountDoc.email,
   isApproved: accountDoc.isApproved,
+  isActive: accountDoc.isActive !== false,
+  isSuspended: accountDoc.isSuspended === true,
+  sessionVersion: accountDoc.sessionVersion || 0,
   otp: accountDoc.otp ?? null,
+  notificationPrefs: accountDoc.notificationPrefs || {
+    mutedTypes: [],
+    mutedSeverities: [],
+  },
   type,
 });
+
+// A staff/account document that is blocked from accessing the system.
+const isStaffBlocked = (doc: any) => {
+  if (doc.isApproved === false) {
+    return { blocked: true, message: "Account is pending approval" };
+  }
+  if (doc.isSuspended === true) {
+    return {
+      blocked: true,
+      message: doc.suspensionReason
+        ? `Account is suspended: ${doc.suspensionReason}`
+        : "Account is suspended",
+    };
+  }
+  if (doc.isActive === false) {
+    return { blocked: true, message: "Account is deactivated" };
+  }
+  return { blocked: false };
+};
 
 export const authenticateJWT = async (
   request: AuthRequest,
@@ -42,13 +68,16 @@ export const authenticateJWT = async (
   const token = authHeader.split(" ")[1];
 
   try {
-    let decoded: { id: string; role?: string; name?: string } | undefined;
+    let decoded:
+      | { id: string; role?: string; name?: string; sv?: number }
+      | undefined;
     for (const candidate of jwtSecrets) {
       try {
         decoded = jwt.verify(token, candidate) as {
           id: string;
           role?: string;
           name?: string;
+          sv?: number;
         };
         break;
       } catch {
@@ -67,6 +96,18 @@ export const authenticateJWT = async (
     // 1. Check in Staff/Employee Accounts
     const accountDoc = await AccountService.get(id);
     if (accountDoc) {
+      const status = isStaffBlocked(accountDoc);
+      if (status.blocked) {
+        response.status(403).json({ message: status.message });
+        return;
+      }
+      const sessionVersion = accountDoc.sessionVersion || 0;
+      if (decoded.sv !== undefined && decoded.sv !== sessionVersion) {
+        response
+          .status(401)
+          .json({ message: "Session revoked. Please log in again." });
+        return;
+      }
       request.account = buildStaffAccount(accountDoc, name, "employee");
       return next();
     }
@@ -74,6 +115,17 @@ export const authenticateJWT = async (
     // 2. Check in Admin / Super Admin collection
     const adminDoc = await AdminService.get(id);
     if (adminDoc) {
+      if (adminDoc.isActive === false) {
+        response.status(403).json({ message: "Admin account is deactivated" });
+        return;
+      }
+      const sessionVersion = adminDoc.sessionVersion || 0;
+      if (decoded.sv !== undefined && decoded.sv !== sessionVersion) {
+        response
+          .status(401)
+          .json({ message: "Session revoked. Please log in again." });
+        return;
+      }
       request.account = {
         _id: adminDoc._id.toString(),
         name:
@@ -84,7 +136,14 @@ export const authenticateJWT = async (
         password: "",
         email: adminDoc.email,
         isApproved: true,
+        isActive: adminDoc.isActive ?? true,
+        isSuspended: false,
+        sessionVersion,
         otp: null,
+        notificationPrefs: adminDoc.notificationPrefs || {
+          mutedTypes: [],
+          mutedSeverities: [],
+        },
         type: adminDoc.type || "admin",
       };
       return next();

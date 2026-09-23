@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthRequest } from "../types/request.type";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getAiModel, GROUNDING_RULES, sanitizeAiText, sanitizeAiHistory } from "../utils/ai";
 import { Paymentservice } from "../services/payment.service";
 import { ChatService } from "../services/chat.service";
 import { SystemService } from "../services/system.service";
@@ -10,21 +10,231 @@ import { uploadToCloudinary } from "../utils/cloudinaryUpload";
 import { RoomService } from "../services/room.service";
 import { BookingService } from "../services/booking.service";
 import { AuditLogModel } from "../model/audit.model";
+import AdminModel from "../model/admin.model";
+import AccountModel from "../model/account.model";
 import { logAuditAction } from "../utils/auditLogger";
 import { NotificationService } from "../services/notification.service";
 import { notify } from "../utils/notification";
+import { notificationTemplates } from "../utils/notificationTemplates";
 import { initSSE } from "../utils/sse";
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import { sendOtpEmail, sendContactInquiryEmail } from "../utils/sendEmail";
 import { validatePassword, validateEmail } from "../utils/validation";
 
+// Escape user-supplied text so it is treated as a literal string, not a regex
+// pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export class SystemController {
 
+   static createBackup = async (request : AuthRequest , response : Response) => {
+     try {
+       const db = mongoose.connection.db;
+       if (!db) {
+         response.status(500).send("Database connection unavailable");
+         return;
+       }
+       const collections = await db.listCollections().toArray();
+       const backup: Record<string, any[]> = {};
+       for (const collection of collections) {
+         const docs = await db
+           .collection(collection.name)
+           .find({})
+           .limit(5000)
+           .toArray();
+         backup[collection.name] = docs;
+       }
+       const payload = {
+         exportedAt: new Date().toISOString(),
+         database: db.databaseName,
+         collections: backup,
+       };
+       await logAuditAction({
+         action: "BACKUP_CREATED",
+         details: `Exported ${collections.length} collection(s) from the database`,
+         actorName: request.account?.name || "Administrator",
+         actorRole: request.account?.type || "admin",
+         targetType: "system",
+       });
+       response.send(payload);
+     } catch (error) {
+       console.log("Failed to create backup: " + (error as Error).message);
+       response.status(500).send("Failed to create backup: " + (error as Error).message);
+     }
+   };
+
+   static restoreBackup = async (request : AuthRequest , response : Response) => {
+     try {
+       const { collections } = request.body;
+       if (!collections || typeof collections !== "object" || Array.isArray(collections)) {
+         response.status(400).send("Invalid backup payload. Provide a collections object.");
+         return;
+       }
+
+       const collectionNames = Object.keys(collections);
+       if (collectionNames.length === 0) {
+         response.status(400).send("Backup payload has no collections");
+         return;
+       }
+
+       // Never restore into system-only collections that would break auth.
+       const RESTORE_EXCLUDED = new Set(["admins", "loginattempts"]);
+       const db = mongoose.connection.db;
+       if (!db) {
+         response.status(500).send("Database connection unavailable");
+         return;
+       }
+
+       let insertedCount = 0;
+       for (const name of collectionNames) {
+         if (RESTORE_EXCLUDED.has(name.toLowerCase())) continue;
+         const docs = collections[name];
+         if (!Array.isArray(docs) || docs.length === 0) continue;
+         try {
+           await db.collection(name).deleteMany({});
+           await db.collection(name).insertMany(docs, { ordered: false });
+           insertedCount += docs.length;
+         } catch (err) {
+           console.warn("Skipped restore for collection " + name + ": " + (err as Error).message);
+         }
+       }
+
+       await logAuditAction({
+         action: "BACKUP_RESTORED",
+         details: `Restored ${insertedCount} document(s) across ${collectionNames.length} collection(s)`,
+         actorName: request.account?.name || "Administrator",
+         actorRole: request.account?.type || "admin",
+         targetType: "system",
+       });
+
+       response.send({ success: true, insertedCount, restoredCollections: collectionNames.length });
+     } catch (error) {
+       console.log("Failed to restore backup: " + (error as Error).message);
+       response.status(500).send("Failed to restore backup: " + (error as Error).message);
+     }
+   };
+
    static getAllPayments = async (request : AuthRequest , response : Response) => {
-      const payments = await Paymentservice.getAll()
-      response.send(payments)
+      const { page, limit, search } = request.query;
+      const result = await Paymentservice.list({
+        page: Number(page) || 1,
+        limit: Number(limit) || 50,
+        search: typeof search === "string" ? search : "",
+      });
+      response.send(result)
     }
+
+   static refundPayment = async (request : AuthRequest , response : Response) => {
+     try {
+       const { paymentId, reason, note } = request.body;
+
+       if (!paymentId) {
+         response.status(400).send("Payment id is required");
+         return;
+       }
+
+       const payment = await Paymentservice.get(paymentId);
+       if (!payment) {
+         response.status(404).send("Payment not found");
+         return;
+       }
+
+       if (payment.status === "refunded") {
+         response.status(409).send("This payment has already been refunded");
+         return;
+       }
+
+       const account = request.account;
+       const refundedBy = account?.name || "Staff";
+
+       const refundRef = note || `RFN-${paymentId.slice(-6).toUpperCase()}`;
+
+       await Paymentservice.markRefunded(paymentId, {
+         refundedBy,
+         refundReason: reason || "",
+         refundRef,
+       });
+
+       await logAuditAction({
+         action: "PAYMENT_REFUNDED",
+         details: `Refunded payment ${paymentId} (₱${payment.amount || 0} via ${payment.method || "Cash"}, ${payment.refNumber || ""}) to ${payment.paymentBy || "Guest"}${reason ? ` — ${reason}` : ""}`,
+         actorName: refundedBy,
+         actorRole: account?.type || "employee",
+         targetType: "payment",
+         targetId: String(payment._id),
+       });
+
+       await notify({
+         type: "payment",
+         title: `Payment Refunded: ${payment.paymentBy || "Guest"}`,
+         message: `Refund of ₱${payment.amount || 0} recorded${reason ? ` (${reason})` : ""}`,
+         severity: "warning",
+         link: "/pages/admin/payments",
+         targetType: "payment",
+         targetId: String(payment._id),
+       });
+
+       response.send(await Paymentservice.getAll());
+     } catch (error) {
+       console.log("Failed to refund payment: " + (error as Error).message);
+       response.status(500).send("Failed to refund payment");
+     }
+   }
+
+   static restorePayment = async (request : AuthRequest , response : Response) => {
+     try {
+       const { paymentId } = request.body;
+
+       if (!paymentId) {
+         response.status(400).send("Payment id is required");
+         return;
+       }
+
+       const payment = await Paymentservice.get(paymentId);
+       if (!payment) {
+         response.status(404).send("Payment not found");
+         return;
+       }
+
+       if (payment.status !== "refunded") {
+         response.status(409).send("This payment is not refunded");
+         return;
+       }
+
+       await Paymentservice.update(paymentId, {
+         date: payment.date,
+         amount: payment.amount,
+         receivedBy: payment.receivedBy,
+         paymentBy: payment.paymentBy,
+         method: payment.method,
+         refNumber: payment.refNumber,
+         folio: payment.folio,
+         balance: payment.balance,
+         status: "paid",
+         refundedAt: null,
+         refundedBy: "",
+         refundReason: "",
+         refundRef: "",
+       });
+
+       await logAuditAction({
+         action: "PAYMENT_RESTORED",
+         details: `Restored refunded payment ${paymentId} (₱${payment.amount || 0})`,
+         actorName: request.account?.name || "Staff",
+         actorRole: request.account?.type || "employee",
+         targetType: "payment",
+         targetId: String(payment._id),
+       });
+
+       response.send(await Paymentservice.getAll());
+     } catch (error) {
+       console.log("Failed to restore payment: " + (error as Error).message);
+       response.status(500).send("Failed to restore payment");
+     }
+   }
 
    static getSystemInfo = async (request : AuthRequest , response : Response) => {
       const systemInfo = await SystemService.get()
@@ -50,10 +260,63 @@ export class SystemController {
      }
    };
 
+   static getAdmins = async (request: AuthRequest, response: Response) => {
+     try {
+       const admins = await AdminService.getAllAdmins();
+       response.send(admins.map((a) => a.toObject()));
+     } catch (error) {
+       console.log("Failed to get admins: " + (error as Error).message);
+       response.status(500).send("Failed to get admins");
+     }
+   };
+
+   static toggleAdminActive = async (request: AuthRequest, response: Response) => {
+     try {
+       const { _id, isActive } = request.body;
+       if (!_id) {
+         response.status(400).send("Admin id is required");
+         return;
+       }
+       const admin = await AdminService.get(_id);
+       if (!admin) {
+         response.status(404).send("Admin not found");
+         return;
+       }
+       if (admin.type === "super admin" && isActive === false) {
+         response.status(400).send("The super admin cannot be deactivated");
+         return;
+       }
+       await AdminService.setActive(_id, Boolean(isActive));
+       await logAuditAction({
+         action: isActive === false ? "ADMIN_DEACTIVATED" : "ADMIN_REACTIVATED",
+         details: `${isActive === false ? "Deactivated" : "Reactivated"} admin ${admin.email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "admin",
+         targetType: "admin",
+         targetId: _id,
+       });
+       response.send({ message: "Admin status updated" });
+     } catch (error) {
+       console.log("Failed to toggle admin: " + (error as Error).message);
+       response.status(500).send("Failed to toggle admin");
+     }
+   };
+
    static updateSystemInfo = async (request: AuthRequest, response: Response) => {
     try {
       const { systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail } = request.body
-      const system = await SystemService.update({ systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail })
+
+      const updateData: any = { systemInfo, systemName, header, description, facebook, contactEmail };
+      const sanitizedPaymentMin = Number(paymentMin);
+      if (Number.isFinite(sanitizedPaymentMin) && sanitizedPaymentMin >= 0) {
+        updateData.paymentMin = sanitizedPaymentMin;
+      }
+      const sanitizedGracePeriod = Number(gracePeriodHours);
+      if (Number.isFinite(sanitizedGracePeriod) && sanitizedGracePeriod >= 0) {
+        updateData.gracePeriodHours = sanitizedGracePeriod;
+      }
+
+      const system = await SystemService.update(updateData)
       response.send(system)
     } catch (error) {
       console.log("Failed to update system info: " + (error as Error).message)
@@ -349,29 +612,32 @@ export class SystemController {
     }
   }
 
-  static aiChatBot = async (request: AuthRequest, response: Response) => {
+static aiChatBot = async (request: AuthRequest, response: Response) => {
     try {
-      const { input, convo } = request.body;
+      const input = sanitizeAiText(request.body?.input, 2000);
+      const convo = sanitizeAiHistory(request.body?.convo);
 
-      const systeminfo = await SystemService.get()
+      if (!input) {
+        response.status(400).send("Message text is required.");
+        return;
+      }
 
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+      const systeminfo = await SystemService.get();
 
-      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      const model = getAiModel({ temperature: 0.4, maxOutputTokens: 1024 });
 
-
-     
-      
-  
       const prompt = `
-            ${systeminfo?.systemInfo}
+${GROUNDING_RULES}
 
-            Previous Conversation:
-            ${Array.isArray(convo) ? convo.join("\n") : ""}
+Hotel Information & Policies:
+${sanitizeAiText(systeminfo?.systemInfo, 5000) || "Standard hotel policies apply."}
 
-            User:
-            ${input}
-       `;
+Previous Conversation:
+${convo.length > 0 ? convo.join("\n") : "(none)"}
+
+Guest:
+${input}
+`;
 
       const result = await model.generateContent(prompt);
       const aiReply = result.response.text();
@@ -390,37 +656,42 @@ export class SystemController {
 
   static aiSuggestReply = async (request: AuthRequest, response: Response) => {
     try {
-      const { convo, clientName } = request.body;
+      const { clientName } = request.body;
+      const convo = sanitizeAiHistory(
+        request.body?.convo,
+        typeof clientName === "string" ? clientName : undefined,
+      );
 
       const systeminfo = await SystemService.get();
       const rooms = await RoomService.getAll();
 
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      const model = getAiModel({ temperature: 0.5, maxOutputTokens: 900 });
 
       const roomSummary = rooms && rooms.length > 0
         ? rooms.map((r) => `${r.roomNumber ? `Room ${r.roomNumber} (` : ""}${r.category}${r.roomNumber ? ")" : ""}: ₱${r.price.toLocaleString()}/night (Status: ${r.status})`).join(", ")
         : "Standard luxury rooms available.";
 
       const prompt = `
-You are an expert AI receptionist and co-pilot assisting front-desk staff for "${systeminfo?.systemName || "Hotel"}".
+You are an expert AI receptionist and co-pilot assisting front-desk staff for "${sanitizeAiText(systeminfo?.systemName, 100) || "Hotel"}".
+
+${GROUNDING_RULES}
 
 Hotel Information & Policies:
-${systeminfo?.systemInfo || "Standard hotel policies apply."}
+${sanitizeAiText(systeminfo?.systemInfo, 5000) || "Standard hotel policies apply."}
 
-Available Room Types & Rates:
+Available Room Types & Rates (verify against this list, never guess prices):
 ${roomSummary}
 
 Location & Hours:
 Francia Sur, Jose D. Aspiras Hwy, Tubao, La Union. Open 24/7.
 Payment methods accepted: GCash, Online payment, Cash at front desk.
 
-Conversation with Guest (${clientName || "Guest"}):
-${Array.isArray(convo) ? convo.map((m: any) => `${m.user === "staff" ? "Front Desk" : clientName || "Guest"}: ${m.message}`).join("\n") : ""}
+Conversation with Guest:
+${convo.length > 0 ? convo.join("\n") : "(no previous messages)"}
 
 Task:
 Draft a polite, professional, warm, and concise reply that the staff member can send to the guest right now.
-Directly answer the guest's latest question or inquiry.
+Directly answer the guest's latest question or inquiry using ONLY the hotel information above.
 Return ONLY the suggested reply message text without any quotes, conversational intros, or Markdown code fences.
 `;
 
@@ -614,18 +885,24 @@ Return ONLY the suggested reply message text without any quotes, conversational 
 
   static aiForecastSuggestions = async (request: AuthRequest, response: Response) => {
     try {
-      const { forecastData, baseline, peakMonths, slowMonths, totalForecast, projectedOccupancy } = request.body;
+      const {
+        forecastData,
+        baseline,
+        peakMonths,
+        slowMonths,
+        totalForecast,
+        projectedOccupancy,
+      } = request.body;
 
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-      const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      const model = getAiModel({ temperature: 0.3, maxOutputTokens: 1400 });
 
       const prompt = `
 You are a senior hotel revenue management and hospitality operations consultant.
 Analyze the following 6-month hotel occupancy forecast and historical baseline data:
 
 Forecast Metrics:
-- Monthly Baseline: ${baseline} average bookings/month
-- 6-Month Projected Volume: ${totalForecast} total bookings
+- Monthly Baseline: ${sanitizeAiText(String(baseline ?? ""), 100) || "N/A"} average bookings/month
+- 6-Month Projected Volume: ${sanitizeAiText(String(totalForecast ?? ""), 100) || "N/A"} total bookings
 - Projected Peak Surge Months: ${JSON.stringify(peakMonths || [])}
 - Projected Low Occupancy Months: ${JSON.stringify(slowMonths || [])}
 - Full 6-Month Breakdown: ${JSON.stringify(forecastData || [])}
@@ -633,7 +910,11 @@ Forecast Metrics:
   projectedOccupancy || []
 )}
 
-Provide strategic, professional recommendations divided into exactly these 4 categories:
+${GROUNDING_RULES}
+
+Work ONLY from the numeric data above. Do not invent booking volumes, revenue
+figures, or occupancy rates. Provide strategic, professional recommendations
+divided into exactly these 4 categories:
 1. Dynamic Pricing Strategy (Specific percentage surge pricing, minimum stay rules for peak months, low-demand discount packages, flash sales)
 2. Staffing & Operations Plan (Housekeeping and reception shift scaling, deep cleaning, scheduled AC and room maintenance during slow periods)
 3. Marketing & Outreach Campaign (Early-bird campaigns, launch lead-times 30-45 days before peak dates, corporate weekday packages, repeat guest incentives)
@@ -694,18 +975,18 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
 
   static getAuditLogs = async (request: AuthRequest, response: Response) => {
     try {
-      const limit = Number(request.query.limit) || 100;
+      const limit = Math.min(500, Math.max(1, Math.floor(Number(request.query.limit) || 100)));
       const search = request.query.search as string;
       const action = request.query.action as string;
 
       const query: any = {};
 
       if (action && action !== "all") {
-        query.action = { $regex: action, $options: "i" };
+        query.action = { $regex: escapeRegex(action), $options: "i" };
       }
 
       if (search && search.trim()) {
-        const searchRegex = { $regex: search.trim(), $options: "i" };
+        const searchRegex = { $regex: escapeRegex(search.trim()), $options: "i" };
         query.$or = [
           { actorName: searchRegex },
           { details: searchRegex },
@@ -725,11 +1006,11 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
   static getSystemHealth = async (request: AuthRequest, response: Response) => {
     try {
       const isMongoConnected = mongoose.connection.readyState === 1;
-      const isCloudinaryConfigured = !!(process.env.cloud_name || process.env.CLOUDINARY_CLOUD_NAME);
+      const isCloudinaryConfigured = !!(process.env.CLOUDINARY_CLOUD_NAME);
       const isStripeConfigured = !!(process.env.STRIPE_SECRET_KEY);
       const isPaymongoConfigured = !!(process.env.PAYMONGO_SECRET_KEY);
       const isGeminiConfigured = !!(process.env.GEMINI_API_KEY);
-      const isBrevoConfigured = !!(process.env.brevo_api_key);
+      const isBrevoConfigured = !!(process.env.BREVO_API_KEY);
 
       response.send({
         timestamp: new Date().toISOString(),
@@ -774,10 +1055,11 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
 
   static getAdminNotifications = async (request: AuthRequest, response: Response) => {
     try {
+      const prefs = request.account?.notificationPrefs;
       const [items, unreadCount, typeCounts] = await Promise.all([
-        NotificationService.getForAdmin(100),
-        NotificationService.getUnreadCountForAdmin(),
-        NotificationService.countByType(),
+        NotificationService.getForAdmin(prefs, 100),
+        NotificationService.getUnreadCountForAdmin(prefs),
+        NotificationService.countByType(prefs),
       ]);
 
       const countsByType = new Map(typeCounts.map((t) => [t._id, t.count]));
@@ -814,10 +1096,11 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       await SystemController.generateOverdueReminders();
 
       const permissions = request.account?.permisions || [];
+      const prefs = request.account?.notificationPrefs;
       const [items, unreadCount, typeCounts] = await Promise.all([
-        NotificationService.getForStaff(permissions, 100),
-        NotificationService.getUnreadCountForStaff(permissions),
-        NotificationService.countByTypeForStaff(permissions),
+        NotificationService.getForStaff(permissions, prefs, 100),
+        NotificationService.getUnreadCountForStaff(permissions, prefs),
+        NotificationService.countByTypeForStaff(permissions, prefs),
       ]);
 
       const countsByType = new Map(typeCounts.map((t) => [t._id, t.count]));
@@ -846,6 +1129,79 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       response.status(500).send("Failed to get staff notifications: " + (error as Error).message);
     }
   };
+
+  // Normalizes the incoming preference payload against the known enum sets and
+  // persists it to whichever collection owns the authenticated identity.
+  static updateNotificationPrefs = async (request: AuthRequest, response: Response) => {
+    try {
+      const prefs = SystemController.normalizePrefs(request.body);
+      const id = request.account?._id;
+      const isAdminType =
+        request.account?.type === "admin" || request.account?.type === "super admin";
+      if (!id) {
+        response.status(401).send("Unauthenticated");
+        return;
+      }
+      if (isAdminType) {
+        await AdminModel.findByIdAndUpdate(id, { notificationPrefs: prefs });
+      } else {
+        await AccountModel.findByIdAndUpdate(id, { notificationPrefs: prefs });
+      }
+      await logAuditAction({
+        action: "NOTIFICATION_PREFS_UPDATED",
+        details: "Notification preferences updated",
+        actorName: request.account?.name,
+        actorRole: request.account?.type || "employee",
+        targetType: "system",
+        targetId: String(id),
+        metadata: { mutedTypes: prefs.mutedTypes, mutedSeverities: prefs.mutedSeverities },
+      });
+      response.send({ notificationPrefs: prefs });
+    } catch (error) {
+      response.status(500).send("Failed to update notification preferences: " + (error as Error).message);
+    }
+  };
+
+  static updateNotificationPrefsStaff = SystemController.updateNotificationPrefs;
+
+  static getNotificationPrefs = async (request: AuthRequest, response: Response) => {
+    try {
+      const prefs = request.account?.notificationPrefs || {};
+      const id = request.account?._id;
+      const isAdminType =
+        request.account?.type === "admin" || request.account?.type === "super admin";
+      if (!id) {
+        response.status(401).send("Unauthenticated");
+        return;
+      }
+      const stored = isAdminType
+        ? await AdminModel.findById(id).select("notificationPrefs")
+        : await AccountModel.findById(id).select("notificationPrefs");
+      response.send({
+        notificationPrefs:
+          stored?.notificationPrefs || request.account?.notificationPrefs || {
+            mutedTypes: [],
+            mutedSeverities: [],
+          },
+      });
+    } catch (error) {
+      response.status(500).send("Failed to get notification preferences: " + (error as Error).message);
+    }
+  };
+
+  static getNotificationPrefsStaff = SystemController.getNotificationPrefs;
+
+  private static normalizePrefs(body: any) {
+    const allowedTypes = ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping"];
+    const allowedSeverities = ["info", "success", "warning", "danger"];
+    const mutedTypes = Array.isArray(body?.mutedTypes)
+      ? body.mutedTypes.filter((t: unknown) => typeof t === "string" && allowedTypes.includes(t))
+      : [];
+    const mutedSeverities = Array.isArray(body?.mutedSeverities)
+      ? body.mutedSeverities.filter((s: unknown) => typeof s === "string" && allowedSeverities.includes(s))
+      : [];
+    return { mutedTypes, mutedSeverities };
+  }
 
   static streamAdminNotifications = async (request: AuthRequest, response: Response) => {
     initSSE(response, "admin");
@@ -970,15 +1326,9 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
         if (!(await BookingService.claimArrivalNotification(bookingId))) continue;
 
         await notify({
-          type: "reservation",
-          title: "Arrival Today",
-          message: `${booking.clientName}${booking.clientPhone ? ` (${booking.clientPhone})` : ""} is expected to arrive today at ${booking.arrivalTime}.`,
-          severity: "info",
-          link: "/pages/staff/reservation",
+          ...notificationTemplates.arrivalToday(booking),
           targetType: "booking",
           targetId: bookingId,
-          audience: "staff",
-          permission: "frontdesk management",
         });
       }
     } catch (error) {
@@ -1019,15 +1369,9 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
         if (!(await BookingService.claimOverdueNotification(bookingId))) continue;
 
         await notify({
-          type: "reservation",
-          title: "Overdue Arrival",
-          message: `${booking.clientName}${booking.clientPhone ? ` (${booking.clientPhone})` : ""} was expected to arrive on ${booking.arrivalDate} at ${booking.arrivalTime} but has not checked in.`,
-          severity: "warning",
-          link: "/pages/staff/reservation",
+          ...notificationTemplates.overdueArrival(booking),
           targetType: "booking",
           targetId: bookingId,
-          audience: "staff",
-          permission: "frontdesk management",
         });
       }
     } catch (error) {
@@ -1068,15 +1412,12 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
         if (!(await BookingService.claimGraceNotification(bookingId))) continue;
 
         await notify({
-          type: "reservation",
-          title: "Grace Period",
-          message: `${booking.clientName}${booking.clientPhone ? ` (${booking.clientPhone})` : ""} has passed the arrival time of ${booking.arrivalTime} and is now within the ${graceHours}-hour grace period.`,
-          severity: "warning",
-          link: "/pages/staff/reservation",
+          ...notificationTemplates.gracePeriod(
+            booking,
+            graceHours,
+          ),
           targetType: "booking",
           targetId: bookingId,
-          audience: "staff",
-          permission: "frontdesk management",
         });
       }
     } catch (error) {

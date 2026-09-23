@@ -8,6 +8,7 @@ import {
   isBookingType,
 } from "../types/bookings.type";
 import { BookingService } from "../services/booking.service";
+import BookingsModel from "../model/bookings.model";
 import { RoomService } from "../services/room.service";
 import { Paymentservice } from "../services/payment.service";
 import { SystemService } from "../services/system.service";
@@ -31,6 +32,12 @@ function generateFolio(bookingId?: string): string {
     ? bookingId.slice(-6).toUpperCase()
     : Math.random().toString(36).slice(2, 8).toUpperCase();
   return `FOL-${today}-${code}`;
+}
+
+function generateVerificationCode(bookingId: string): string {
+  const suffix = bookingId.slice(-4).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${suffix}-${random}`;
 }
 
 function validateArrivalDateTime(
@@ -84,7 +91,11 @@ function nightsSince(arrivalDate: string): number {
 export class BookingController {
   static getAllBookings = async (request: AuthRequest, response: Response) => {
     try {
-      const bookings = await BookingService.getAll();
+      const { status, search } = request.query;
+      const bookings = await BookingService.getAll({
+        status: typeof status === "string" ? status : undefined,
+        search: typeof search === "string" ? search : undefined,
+      });
       response.send(bookings);
     } catch (error) {
       console.log("Failed to get bookings: " + (error as Error).message);
@@ -102,10 +113,148 @@ export class BookingController {
         response.status(404).send("Booking not found");
         return;
       }
-      response.send(booking);
+      const publicBooking = { ...booking };
+      delete (publicBooking as Record<string, unknown>).clientAddress;
+      delete (publicBooking as Record<string, unknown>).clientEmail;
+      delete (publicBooking as Record<string, unknown>).clientPhone;
+      response.send(publicBooking);
     } catch (error) {
       console.log("Failed to get booking: " + (error as Error).message);
       response.status(500).send("Failed to get booking");
+    }
+  };
+
+  static guestDirectory = async (request: AuthRequest, response: Response) => {
+    try {
+      const guests = await BookingService.getGuestDirectory();
+      response.send(guests);
+    } catch (error) {
+      console.log("Failed to get guest directory: " + (error as Error).message);
+      response.status(500).send("Failed to get guest directory");
+    }
+  };
+
+  static updateGuestRecord = async (request: AuthRequest, response: Response) => {
+    try {
+      const { key, clientName, clientEmail, clientPhone, clientAddress } =
+        request.body;
+
+      if (!key || typeof key !== "string") {
+        response.status(400).send("Guest identifier is required");
+        return;
+      }
+
+      const guests = await BookingService.getGuestDirectory();
+      const guest = guests.find((g: any) => g.key === key);
+      if (!guest) {
+        response.status(404).send("Guest not found");
+        return;
+      }
+
+      const match: {
+        clientEmail?: string;
+        clientPhone?: string;
+        clientName?: string;
+      } = {};
+      if (guest.email) {
+        match.clientEmail = guest.email;
+      } else if (guest.phone) {
+        match.clientPhone = guest.phone;
+      } else {
+        match.clientName = guest.name;
+      }
+
+      const result = await BookingService.updateGuestIdentity(match, {
+        clientName:
+          clientName !== undefined ? String(clientName).trim() : undefined,
+        clientEmail:
+          clientEmail !== undefined ? String(clientEmail).trim() : undefined,
+        clientPhone:
+          clientPhone !== undefined ? String(clientPhone).trim() : undefined,
+        clientAddress:
+          clientAddress !== undefined ? String(clientAddress).trim() : undefined,
+      });
+
+      await logAuditAction({
+        action: "GUEST_RECORD_UPDATED",
+        details: `Updated guest record for "${guest.name}" (${result.modifiedCount || 0} booking record${result.modifiedCount === 1 ? "" : "s"} updated)`,
+        actorName: request.account?.name || "Staff",
+        actorRole: request.account?.type || "employee",
+        targetType: "guest",
+      });
+
+      const updated = await BookingService.getGuestDirectory();
+      response.send(updated);
+    } catch (error) {
+      console.log("Failed to update guest record: " + (error as Error).message);
+      response.status(500).send("Failed to update guest record");
+    }
+  };
+
+  static guestStatusLookup = async (request: AuthRequest, response: Response) => {
+    try {
+      const { bookingId, verificationCode } = request.body;
+
+      if (!bookingId || typeof bookingId !== "string") {
+        response.status(400).send("Booking reference is required");
+        return;
+      }
+
+      if (!verificationCode || typeof verificationCode !== "string") {
+        response
+          .status(400)
+          .send("The verification code from your confirmation email is required");
+        return;
+      }
+
+      const booking = await BookingService.get(bookingId);
+      if (!booking) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      if (!booking.verificationCode) {
+        response
+          .status(403)
+          .send(
+            "This booking has no verification code on record. Contact the front desk to verify your reservation.",
+          );
+        return;
+      }
+
+      if (verificationCode.trim().toUpperCase() !== booking.verificationCode) {
+        response.status(403).send("Incorrect verification code");
+        return;
+      }
+
+      const roomLabel =
+        booking.room && typeof booking.room === "object"
+          ? `${(booking.room as { roomNumber?: string }).roomNumber ? `Room ${(booking.room as { roomNumber?: string }).roomNumber} · ` : ""}${(booking.room as { category?: string }).category || "Room"}`
+          : "Room";
+
+      response.send({
+        status: booking.status,
+        type: booking.type,
+        clientName: booking.clientName,
+        room: roomLabel,
+        arrivalDate: booking.arrivalDate,
+        arrivalTime: booking.arrivalTime,
+        departureDate: booking.departureDate || "",
+        guests: booking.guests,
+        amountPaid: Number(booking.paymentAmount) || 0,
+        totalAmount: Number(booking.totalAmount) || 0,
+        paymentMethod: booking.paymentMethod || "",
+        paymentRefNumber: booking.paymentRefNumber || "",
+        nonRefundable: booking.nonRefundable === true,
+        policyAcceptedAt: booking.policyAcceptedAt || null,
+        noShowAt: booking.noShowAt || null,
+        canceledAt: booking.canceledAt || null,
+        cancellationReason: booking.cancellationReason || "",
+        checkedOutAt: booking.checkedOutAt || null,
+      });
+    } catch (error) {
+      console.log("Failed to look up booking: " + (error as Error).message);
+      response.status(500).send("Failed to look up booking");
     }
   };
 
@@ -212,6 +361,8 @@ export class BookingController {
       await logAuditAction({
         action: "WALK_IN_CHECKIN",
         details: `Walk-in check-in for guest ${clientName} on ${arrivalDate} (${arrivalTime}) until ${departureDate || "open-ended"} · ${guestCount} guest(s)`,
+        actorName: request.account?.name || "Staff",
+        actorRole: request.account?.type || "employee",
         targetType: "booking",
         targetId: booking._id ? String(booking._id) : undefined,
       });
@@ -285,6 +436,7 @@ export class BookingController {
         : String(existing.room ?? "");
       const newRoomId = room || currentRoomId;
 
+      let newRoomDoc: any = null;
       if (newRoomId !== currentRoomId) {
         const newRoom = await RoomService.get(newRoomId);
         if (!newRoom) {
@@ -299,6 +451,7 @@ export class BookingController {
             );
           return;
         }
+        newRoomDoc = newRoom;
       }
 
       const updatePayload: bookingInterfaceInput = {
@@ -324,6 +477,65 @@ export class BookingController {
           return;
         }
         updatePayload.guests = Number(guests);
+      }
+
+      if (existing.status !== "completed" && existing.status !== "canceled") {
+        const account = request.account;
+        const changedBy = account?.name || "Staff";
+        const history: any[] = [];
+
+        if (newRoomId !== currentRoomId) {
+          history.push({
+            field: "room",
+            from: (existing.room as any)?.roomNumber || currentRoomId,
+            to: newRoomDoc?.roomNumber || newRoomId,
+            changedBy,
+            changedAt: new Date(),
+          });
+        }
+        if (existing.arrivalDate !== text(arrivalDate)) {
+          history.push({
+            field: "arrivalDate",
+            from: existing.arrivalDate,
+            to: text(arrivalDate),
+            changedBy,
+            changedAt: new Date(),
+          });
+        }
+        if (existing.arrivalTime !== text(arrivalTime)) {
+          history.push({
+            field: "arrivalTime",
+            from: existing.arrivalTime,
+            to: text(arrivalTime),
+            changedBy,
+            changedAt: new Date(),
+          });
+        }
+        if (
+          departureDate &&
+          (existing.departureDate || "") !== departureDate
+        ) {
+          history.push({
+            field: "departureDate",
+            from: existing.departureDate || "",
+            to: departureDate,
+            changedBy,
+            changedAt: new Date(),
+          });
+        }
+        if (existing.status !== text(status)) {
+          history.push({
+            field: "status",
+            from: existing.status,
+            to: text(status),
+            note: "Booking edited",
+            changedBy,
+            changedAt: new Date(),
+          });
+        }
+        for (const entry of history) {
+          await BookingService.recordModification(_id, entry);
+        }
       }
 
       await BookingService.update(_id, updatePayload);
@@ -364,6 +576,8 @@ export class BookingController {
       await logAuditAction({
         action: "BOOKING_DELETED",
         details: `Deleted booking with ID ${_id}`,
+        actorName: request.account?.name || "Staff",
+        actorRole: request.account?.type || "employee",
         targetType: "booking",
         targetId: _id,
       });
@@ -428,7 +642,31 @@ export class BookingController {
       const departureDate = localDateStr();
       await BookingService.setDepartureDate(bookingId, departureDate);
 
+      const wasScheduledDeparture =
+        booking.departureDate && booking.departureDate > departureDate;
+      await BookingsModel.findByIdAndUpdate(bookingId, {
+        checkedOutAt: new Date(),
+        earlyCheckout: wasScheduledDeparture === true,
+      });
+
+      await BookingService.recordModification(bookingId, {
+        field: "status",
+        from: booking.status,
+        to: "completed",
+        note: wasScheduledDeparture
+          ? `Early checkout on ${departureDate} (scheduled departure ${booking.departureDate})`
+          : `Checked out on ${departureDate}`,
+        changedBy: account?.name || "Staff",
+        changedAt: new Date(),
+      });
+
       await BookingService.reconcileRoomStatus(roomRef);
+
+      await RoomService.markHousekeepingDirty(
+        roomRef,
+        account?.name || "Staff",
+        "Guest checked out — needs cleaning",
+      );
 
       const generatedRef =
         refNumber ||
@@ -702,10 +940,18 @@ export class BookingController {
       };
 
       const booking = await BookingService.create(bookingData);
+      const verificationCode = generateVerificationCode(String(booking._id));
+      await BookingService.setVerificationCode(
+        String(booking._id),
+        verificationCode,
+      );
+      await BookingService.reconcileRoomStatus(room);
 
       await logAuditAction({
         action: "ONLINE_RESERVATION",
         details: `New online reservation created for guest ${clientName} for arrival on ${arrivalDate} (check-out ${departureDate}, ${guestCount} guest(s)) — non-refundable policy accepted`,
+        actorName: clientName || "Guest",
+        actorRole: "guest",
         targetType: "booking",
         targetId: String(booking._id),
       });
@@ -713,7 +959,11 @@ export class BookingController {
       // No notification here — the admin is only alerted once the guest's
       // payment is actually processed (see reservationPayment).
 
-      response.send({ bookingId: booking._id, nonRefundable: true });
+      response.send({
+        bookingId: booking._id,
+        verificationCode,
+        nonRefundable: true,
+      });
     } catch (error) {
       console.log("Failed to create reservation: " + (error as Error).message);
       response.status(500).send("Failed to create reservation");
@@ -779,7 +1029,7 @@ export class BookingController {
       const booking = await BookingService.get(bookingId);
 
       if (!booking) {
-        response.status(500).send("no booking");
+        response.status(404).send("Booking not found");
         return;
       }
 
@@ -982,11 +1232,20 @@ export class BookingController {
       const booking = await BookingService.get(bookingId);
 
       if (!booking) {
-        response.status(500).send("no booking");
+        response.status(404).send("Booking not found");
         return;
       }
 
       await BookingService.updateStatus(bookingId, "active");
+
+      await BookingService.recordModification(bookingId, {
+        field: "status",
+        from: booking.status,
+        to: "active",
+        note: "Reservation activated / guest checked in",
+        changedBy: request.account?.name || "Staff",
+        changedAt: new Date(),
+      });
 
       const roomId = booking.room?._id
         ? String(booking.room._id)
@@ -996,6 +1255,8 @@ export class BookingController {
       await logAuditAction({
         action: "RESERVATION_ACTIVATED",
         details: `Reservation ${bookingId} activated for guest ${booking.clientName}`,
+        actorName: request.account?.name || "Staff",
+        actorRole: request.account?.type || "employee",
         targetType: "booking",
         targetId: bookingId,
       });
@@ -1024,16 +1285,42 @@ export class BookingController {
     response: Response,
   ) => {
     try {
-      const { bookingId } = request.body;
+      const { bookingId, reason } = request.body;
 
       const booking = await BookingService.get(bookingId);
 
       if (!booking) {
-        response.status(500).send("no booking");
+        response.status(404).send("Booking not found");
         return;
       }
 
+      const account = request.account;
+      const canceledBy = account?.name || "Staff";
+
       await BookingService.updateStatus(bookingId, "canceled");
+      await BookingService.update(bookingId, {
+        clientName: booking.clientName,
+        clientAddress: booking.clientAddress,
+        type: booking.type,
+        status: "canceled",
+        arrivalDate: booking.arrivalDate,
+        arrivalTime: booking.arrivalTime,
+        room: booking.room?._id ? String(booking.room._id) : String(booking.room ?? ""),
+      });
+      await BookingsModel.findByIdAndUpdate(bookingId, {
+        canceledAt: new Date(),
+        canceledBy,
+        cancellationReason: reason || "",
+      });
+
+      await BookingService.recordModification(bookingId, {
+        field: "status",
+        from: booking.status,
+        to: "canceled",
+        note: reason ? `Cancellation reason: ${reason}` : "",
+        changedBy: canceledBy,
+        changedAt: new Date(),
+      });
 
       const roomId = booking.room?._id
         ? String(booking.room._id)
@@ -1051,7 +1338,9 @@ export class BookingController {
 
       await logAuditAction({
         action: "RESERVATION_CANCELED",
-        details: `Reservation ${bookingId} canceled for guest ${booking.clientName}.${refundNote}`,
+        details: `Reservation ${bookingId} canceled for guest ${booking.clientName} by ${canceledBy}.${reason ? ` Reason: ${reason}.` : ""}${refundNote}`,
+        actorName: canceledBy,
+        actorRole: account?.type || "employee",
         targetType: "booking",
         targetId: bookingId,
       });
@@ -1059,7 +1348,7 @@ export class BookingController {
       await notify({
         type: "reservation",
         title: `Reservation Canceled: ${booking.clientName}`,
-        message: `Reservation ${bookingId} was canceled.${refundNote}`,
+        message: `Reservation ${bookingId} was canceled${reason ? ` — ${reason}` : ""}.${refundNote}`,
         severity: "warning",
         link: "/pages/admin/dashboard",
         targetType: "booking",
@@ -1077,6 +1366,258 @@ export class BookingController {
       response
         .status(500)
         .send("Failed to update booking: " + (error as Error).message);
+    }
+  };
+
+  static markNoShow = async (request: AuthRequest, response: Response) => {
+    try {
+      const { bookingId, reason } = request.body;
+
+      const booking = await BookingService.get(bookingId);
+
+      if (!booking) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      if (booking.status === "active") {
+        response
+          .status(400)
+          .send("Guest is currently checked in and cannot be marked as no-show");
+        return;
+      }
+
+      const account = request.account;
+      const noShowBy = account?.name || "Staff";
+
+      await BookingService.updateStatus(bookingId, "no-show");
+      await BookingsModel.findByIdAndUpdate(bookingId, {
+        noShowAt: new Date(),
+        noShowBy,
+        noShowReason: reason || "",
+      });
+
+      await BookingService.recordModification(bookingId, {
+        field: "status",
+        from: booking.status,
+        to: "no-show",
+        note: reason ? `No-show reason: ${reason}` : "",
+        changedBy: noShowBy,
+        changedAt: new Date(),
+      });
+
+      const roomId = booking.room?._id
+        ? String(booking.room._id)
+        : String(booking.room ?? "");
+      await BookingService.reconcileRoomStatus(roomId);
+
+      const wasPaid = Number(booking.paymentAmount) || 0;
+
+      await logAuditAction({
+        action: "RESERVATION_NO_SHOW",
+        details: `Reservation ${bookingId} marked as no-show for guest ${booking.clientName} by ${noShowBy}.${reason ? ` Reason: ${reason}.` : ""}`,
+        actorName: noShowBy,
+        actorRole: account?.type || "employee",
+        targetType: "booking",
+        targetId: bookingId,
+      });
+
+      await notify({
+        type: "reservation",
+        title: `No-Show: ${booking.clientName}`,
+        message: `Guest did not arrive — reservation marked as no-show${reason ? ` (${reason})` : ""}.`,
+        severity: "warning",
+        link: "/pages/admin/dashboard",
+        targetType: "booking",
+        targetId: bookingId,
+      });
+
+      response.send({
+        success: true,
+        wasPaid,
+        nonRefundable: booking.nonRefundable === true,
+      });
+    } catch (error) {
+      console.log("Failed to mark no-show: " + (error as Error).message);
+      response
+        .status(500)
+        .send("Failed to mark no-show: " + (error as Error).message);
+    }
+  };
+
+  static rescheduleBooking = async (
+    request: AuthRequest,
+    response: Response,
+  ) => {
+    try {
+      const { bookingId, arrivalDate, arrivalTime, departureDate, note } =
+        request.body;
+
+      const booking = await BookingService.get(bookingId);
+      if (!booking) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      const validationError = validateArrivalDateTime(
+        text(arrivalDate),
+        text(arrivalTime),
+        text(departureDate),
+        true,
+      );
+      if (validationError) {
+        response.status(400).send(validationError);
+        return;
+      }
+
+      const account = request.account;
+      const changedBy = account?.name || "Staff";
+
+      await BookingService.update(bookingId, {
+        clientName: booking.clientName,
+        clientAddress: booking.clientAddress,
+        type: booking.type,
+        status: booking.status,
+        arrivalDate: text(arrivalDate),
+        arrivalTime: text(arrivalTime),
+        departureDate: text(departureDate),
+        wasRescheduled: true,
+        room: booking.room?._id ? String(booking.room._id) : String(booking.room ?? ""),
+      });
+
+      const history: any[] = [];
+      if (booking.arrivalDate !== text(arrivalDate)) {
+        history.push({
+          field: "arrivalDate",
+          from: booking.arrivalDate,
+          to: text(arrivalDate),
+          changedBy,
+          changedAt: new Date(),
+        });
+      }
+      if (booking.arrivalTime !== text(arrivalTime)) {
+        history.push({
+          field: "arrivalTime",
+          from: booking.arrivalTime,
+          to: text(arrivalTime),
+          changedBy,
+          changedAt: new Date(),
+        });
+      }
+      if ((booking.departureDate || "") !== text(departureDate)) {
+        history.push({
+          field: "departureDate",
+          from: booking.departureDate || "",
+          to: text(departureDate),
+          changedBy,
+          changedAt: new Date(),
+        });
+      }
+      for (const entry of history) {
+        await BookingService.recordModification(bookingId, {
+          ...entry,
+          note: note || "",
+        });
+      }
+
+      const roomId = booking.room?._id
+        ? String(booking.room._id)
+        : String(booking.room ?? "");
+      await BookingService.reconcileRoomStatus(roomId);
+
+      await logAuditAction({
+        action: "RESERVATION_RESCHEDULED",
+        details: `Reservation ${bookingId} rescheduled by ${changedBy}: arrival ${booking.arrivalDate} (${booking.arrivalTime}) → ${text(arrivalDate)} (${text(arrivalTime)})${note ? ` · ${note}` : ""}`,
+        actorName: changedBy,
+        actorRole: account?.type || "employee",
+        targetType: "booking",
+        targetId: bookingId,
+      });
+
+      await notify({
+        type: "reservation",
+        title: `Reservation Rescheduled: ${booking.clientName}`,
+        message: `New arrival ${text(arrivalDate)} (${text(arrivalTime)})`,
+        severity: "info",
+        link: "/pages/admin/dashboard",
+        targetType: "booking",
+        targetId: bookingId,
+      });
+
+      response.send({ success: true });
+    } catch (error) {
+      console.log("Failed to reschedule booking: " + (error as Error).message);
+      response
+        .status(500)
+        .send("Failed to reschedule booking: " + (error as Error).message);
+    }
+  };
+
+  static extendStay = async (request: AuthRequest, response: Response) => {
+    try {
+      const { bookingId, departureDate, note } = request.body;
+
+      const booking = await BookingService.get(bookingId);
+      if (!booking) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      const newDeparture = text(departureDate);
+      if (!newDeparture) {
+        response.status(400).send("New departure date is required");
+        return;
+      }
+
+      const error = validateArrivalDateTime(
+        booking.arrivalDate,
+        booking.arrivalTime,
+        newDeparture,
+        true,
+      );
+      if (error) {
+        response.status(400).send(error);
+        return;
+      }
+
+      const account = request.account;
+      const changedBy = account?.name || "Staff";
+
+      await BookingService.update(bookingId, {
+        clientName: booking.clientName,
+        clientAddress: booking.clientAddress,
+        type: booking.type,
+        status: booking.status,
+        arrivalDate: booking.arrivalDate,
+        arrivalTime: booking.arrivalTime,
+        departureDate: newDeparture,
+        room: booking.room?._id ? String(booking.room._id) : String(booking.room ?? ""),
+      });
+
+      await BookingService.recordModification(bookingId, {
+        field: "departureDate",
+        from: booking.departureDate || "",
+        to: newDeparture,
+        note: note ? `Stay extended: ${note}` : "Stay extended",
+        changedBy,
+        changedAt: new Date(),
+      });
+
+      await logAuditAction({
+        action: "STAY_EXTENDED",
+        details: `Booking ${bookingId} extended by ${changedBy}: departure ${booking.departureDate || "-"} → ${newDeparture}${note ? ` · ${note}` : ""}`,
+        actorName: changedBy,
+        actorRole: account?.type || "employee",
+        targetType: "booking",
+        targetId: bookingId,
+      });
+
+      response.send({ success: true });
+    } catch (error) {
+      console.log("Failed to extend stay: " + (error as Error).message);
+      response
+        .status(500)
+        .send("Failed to extend stay: " + (error as Error).message);
     }
   };
 }

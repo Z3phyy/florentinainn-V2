@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import axiosInstance from "./utils/axios";
 import { systemInterface } from "./types/system.type";
 import { roomInterface } from "./types/room.type";
@@ -1356,7 +1357,7 @@ export default function Home() {
                               </div>
                             )}
                             <span className="text-[10px] text-[#5C454B] dark:text-gray-400 block">
-                              per night
+                              per day
                             </span>
                           </div>
                         </div>
@@ -1735,6 +1736,14 @@ export default function Home() {
                 Explore
               </h4>
               <ul className="space-y-2 text-xs text-[#E4D1D1]/80">
+                <li>
+                  <Link
+                    href="/guest/reservationStatus"
+                    className="hover:text-[#F968AC] transition-colors cursor-pointer"
+                  >
+                    Check Reservation Status
+                  </Link>
+                </li>
                 <li>
                   <button
                     onClick={() => scrollToSection("hero-section")}

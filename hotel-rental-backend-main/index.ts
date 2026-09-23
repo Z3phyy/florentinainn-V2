@@ -11,6 +11,8 @@ import systemModel from './model/system.model';
 
 dotenv.config();
 
+process.env.NODE_ENV = process.env.NODE_ENV || "production";
+
 const app = express();
 const port = process.env.PORT || 5000;
 const mongodb_uri = process.env.MONGODB_URI || "";
@@ -142,6 +144,24 @@ app.get('/systemAccount', async (request: Request, response: Response) => {
   response.send("system account created...........")
 });
 
+
+app.use((request: Request, response: Response) => {
+  response.status(404).json({ error: "Not found" });
+});
+
+app.use((error: unknown, request: Request, response: Response, next: Function) => {
+  if (error instanceof mongoose.Error.CastError || (error as { name?: string })?.name === "CastError") {
+    response.status(400).json({ error: "Invalid resource id" });
+    return;
+  }
+  const message = error instanceof Error ? error.message : "Internal server error";
+  if (message === "Not allowed by CORS") {
+    response.status(403).json({ error: message });
+    return;
+  }
+  console.log("Unhandled error: " + message);
+  response.status(500).json({ error: "Internal server error" });
+});
 
 app.listen(port, () => {
   const date = new Date

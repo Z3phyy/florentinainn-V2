@@ -10,6 +10,11 @@ const PaymentSchema = new Schema({
     refNumber: { type: String, default: "" },
     folio: { type: String, default: "" },
     balance: { type: Number, default: 0 },
+    status: { type: String, default: "paid" },
+    refundedAt: { type: Date, default: null },
+    refundedBy: { type: String, default: "" },
+    refundReason: { type: String, default: "" },
+    refundRef: { type: String, default: "" },
 }, { timestamps: true });
 
 export default mongoose.model('Payments', PaymentSchema)
