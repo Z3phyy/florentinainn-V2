@@ -3,6 +3,7 @@ import { AuthRequest } from "../types/request.type";
 import {
   bookingInterfaceInput,
   BOOKING_CREATE_STATUSES,
+  BOOKING_STATUSES,
   BOOKING_UPDATE_STATUSES,
   ONLINE_RESERVATION_STATUSES,
   isBookingType,
@@ -105,6 +106,56 @@ export class BookingController {
     }
   };
 
+  static reservationHistory = async (request: AuthRequest, response: Response) => {
+    try {
+      const q = request.query;
+      const str = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+      const status = str(q.status) || "all";
+      const paymentStatus = str(q.paymentStatus) || "all";
+      const type = str(q.type) || "all";
+      const from = str(q.from);
+      const to = str(q.to);
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+      if (status !== "all" && !(BOOKING_STATUSES as readonly string[]).includes(status)) {
+        response.status(400).json({ message: "Invalid status filter" });
+        return;
+      }
+      if (!["all", "paid", "partial", "unpaid"].includes(paymentStatus)) {
+        response.status(400).json({ message: "Invalid payment status filter" });
+        return;
+      }
+      if (!["all", "walk in", "reservation"].includes(type)) {
+        response.status(400).json({ message: "Invalid booking type filter" });
+        return;
+      }
+      if ((from && !datePattern.test(from)) || (to && !datePattern.test(to))) {
+        response.status(400).json({ message: "Dates must use the YYYY-MM-DD format" });
+        return;
+      }
+      if (from && to && from > to) {
+        response.status(400).json({ message: "The start date must be on or before the end date" });
+        return;
+      }
+
+      const result = await BookingService.getHistory({
+        page: Number(q.page),
+        limit: Number(q.limit),
+        search: str(q.search).slice(0, 100),
+        status,
+        paymentStatus,
+        type,
+        from,
+        to,
+        sortDir: q.sortDir === "asc" ? "asc" : "desc",
+      });
+      response.send(result);
+    } catch (error) {
+      console.log("Failed to get reservation history: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to load reservation history" });
+    }
+  };
+
   static getBooking = async (request: AuthRequest, response: Response) => {
     try {
       const { id } = request.params;
@@ -136,11 +187,23 @@ export class BookingController {
 
   static updateGuestRecord = async (request: AuthRequest, response: Response) => {
     try {
-      const { key, clientName, clientEmail, clientPhone, clientAddress } =
-        request.body;
+      const { key } = request.body || {};
+      const clientName = text(request.body?.clientName);
+      const clientEmail = text(request.body?.clientEmail);
+      const clientPhone = text(request.body?.clientPhone);
+      const clientAddress = text(request.body?.clientAddress);
 
       if (!key || typeof key !== "string") {
         response.status(400).send("Guest identifier is required");
+        return;
+      }
+
+      const inputError =
+        validateGuestName(clientName) ||
+        validateAddress(clientAddress) ||
+        validateContact(clientEmail, clientPhone, { requireEmail: false });
+      if (inputError) {
+        response.status(400).send(inputError);
         return;
       }
 
@@ -165,14 +228,10 @@ export class BookingController {
       }
 
       const result = await BookingService.updateGuestIdentity(match, {
-        clientName:
-          clientName !== undefined ? String(clientName).trim() : undefined,
-        clientEmail:
-          clientEmail !== undefined ? String(clientEmail).trim() : undefined,
-        clientPhone:
-          clientPhone !== undefined ? String(clientPhone).trim() : undefined,
-        clientAddress:
-          clientAddress !== undefined ? String(clientAddress).trim() : undefined,
+        clientName,
+        clientEmail,
+        clientPhone,
+        clientAddress,
       });
 
       await logAuditAction({
@@ -593,10 +652,15 @@ export class BookingController {
 
   static checkOut = async (request: AuthRequest, response: Response) => {
     try {
-      const { bookingId, roomId, amount, paymentBy, method, refNumber } =
-        request.body;
+      const { bookingId, amount, method, refNumber } = request.body || {};
 
       const account = request.account;
+      const staffName = account?.name || "Staff";
+
+      if (typeof bookingId !== "string" || !/^[a-f\d]{24}$/i.test(bookingId)) {
+        response.status(400).send("A valid booking id is required");
+        return;
+      }
 
       const paidAmount = Number(amount || 0);
 
@@ -612,12 +676,30 @@ export class BookingController {
       const booking = await BookingService.get(bookingId);
 
       if (!booking) {
-        response.status(400).send("Booking not found");
+        response.status(404).send("Booking not found");
+        return;
+      }
+
+      if (booking.status === "completed") {
+        response.status(409).send("This guest has already been checked out");
+        return;
+      }
+
+      if (booking.status !== "active") {
+        response
+          .status(400)
+          .send("Only checked-in (in-house) guests can be checked out");
         return;
       }
 
       const room = booking.room as any;
-      const roomRef = roomId || String(room._id);
+      if (!room?._id) {
+        response.status(400).send("The room for this booking no longer exists");
+        return;
+      }
+      const roomRef = String(room._id);
+      const paymentBy = booking.clientName;
+      const paymentMethod = text(method) || "Cash";
 
       const discount = room.discount || 0;
       const nightly = Math.round(room.price * (1 - discount / 100));
@@ -625,8 +707,10 @@ export class BookingController {
       const totalAmount = Math.round(nightly * nights);
 
       const previouslyPaid = Number(booking.paymentAmount) || 0;
-      const accumulatedPaid = previouslyPaid + paidAmount;
-      const remainingBalance = Math.max(0, totalAmount - accumulatedPaid);
+      const balanceBefore = Math.max(0, totalAmount - previouslyPaid);
+      const appliedAmount = Math.min(paidAmount, balanceBefore);
+      const changeDue = Math.max(0, paidAmount - balanceBefore);
+      const remainingBalance = Math.max(0, balanceBefore - appliedAmount);
 
       if (remainingBalance > 0) {
         response
@@ -637,73 +721,85 @@ export class BookingController {
         return;
       }
 
-      await BookingService.updateStatus(bookingId, "completed");
-
       const departureDate = localDateStr();
-      await BookingService.setDepartureDate(bookingId, departureDate);
-
       const wasScheduledDeparture =
-        booking.departureDate && booking.departureDate > departureDate;
-      await BookingsModel.findByIdAndUpdate(bookingId, {
-        checkedOutAt: new Date(),
-        earlyCheckout: wasScheduledDeparture === true,
-      });
+        !!booking.departureDate && booking.departureDate > departureDate;
+      const checkedOutAt = new Date();
 
-      await BookingService.recordModification(bookingId, {
-        field: "status",
-        from: booking.status,
-        to: "completed",
-        note: wasScheduledDeparture
-          ? `Early checkout on ${departureDate} (scheduled departure ${booking.departureDate})`
-          : `Checked out on ${departureDate}`,
-        changedBy: account?.name || "Staff",
-        changedAt: new Date(),
-      });
+      const generatedRef =
+        text(refNumber) || `CHK-${bookingId.slice(-6).toUpperCase()}`;
+      const generatedFolio = generateFolio(bookingId);
+
+      const claimed = await BookingsModel.findOneAndUpdate(
+        {
+          _id: bookingId,
+          status: "active",
+          paymentAmount: previouslyPaid === 0 ? { $in: [0, null] } : previouslyPaid,
+        },
+        {
+          $set: {
+            status: "completed",
+            departureDate,
+            checkedOutAt,
+            earlyCheckout: wasScheduledDeparture,
+            paymentAmount: previouslyPaid + appliedAmount,
+            paymentMethod,
+            paymentRefNumber: generatedRef,
+            totalAmount,
+          },
+          $push: {
+            modificationHistory: {
+              field: "status",
+              from: booking.status,
+              to: "completed",
+              note: wasScheduledDeparture
+                ? `Early checkout on ${departureDate} (scheduled departure ${booking.departureDate})`
+                : `Checked out on ${departureDate}`,
+              changedBy: staffName,
+              changedAt: checkedOutAt,
+            },
+          },
+        },
+        { new: true },
+      );
+
+      if (!claimed) {
+        response
+          .status(409)
+          .send(
+            "This booking was updated by another request. Refresh the guest list and try again.",
+          );
+        return;
+      }
+
+      if (appliedAmount > 0) {
+        await Paymentservice.create({
+          amount: appliedAmount,
+          receivedBy: staffName,
+          date: departureDate,
+          paymentBy,
+          method: paymentMethod,
+          refNumber: generatedRef,
+          folio: generatedFolio,
+          balance: 0,
+        });
+      }
 
       await BookingService.reconcileRoomStatus(roomRef);
 
       await RoomService.markHousekeepingDirty(
         roomRef,
-        account?.name || "Staff",
+        staffName,
         "Guest checked out — needs cleaning",
       );
 
-      const generatedRef =
-        refNumber ||
-        (bookingId
-          ? `CHK-${bookingId.slice(-6).toUpperCase()}`
-          : `CHK-${Date.now().toString(36).toUpperCase()}`);
-
-      const generatedFolio = generateFolio(bookingId);
-
-      await BookingService.updatePaymentInfo(bookingId, {
-        paymentAmount: Math.min(accumulatedPaid, totalAmount),
-        paymentMethod: method || "Cash",
-        paymentRefNumber: generatedRef,
-        totalAmount,
-      });
-
-      await Paymentservice.create({
-        amount: paidAmount,
-        receivedBy: account?.name || "Staff",
-        date: localDateStr(),
-        paymentBy: paymentBy,
-        method: method || "Cash",
-        refNumber: generatedRef,
-        folio: generatedFolio,
-        balance: remainingBalance,
-      });
-
-      const balanceNote =
-        remainingBalance > 0
-          ? ` Remaining balance of ₱${remainingBalance} recorded on the folio.`
-          : "";
-
       await logAuditAction({
-        action:
-          remainingBalance > 0 ? "GUEST_CHECKOUT_PARTIAL" : "GUEST_CHECKOUT",
-        details: `Guest ${paymentBy} checked out. Total ${totalAmount}₱, paid now ${paidAmount}₱ via ${method || "Cash"} (Ref: ${generatedRef}, Folio: ${generatedFolio}). Remaining balance ${remainingBalance}₱.`,
-        actorName: account?.name || "Staff",
+        action: "GUEST_CHECKOUT",
+        details: `Guest ${paymentBy} checked out. Total ${totalAmount}₱, previously paid ${previouslyPaid}₱, collected now ${appliedAmount}₱ via ${paymentMethod}${
+          changeDue > 0 ? ` (tendered ${paidAmount}₱, change ${changeDue}₱)` : ""
+        } (Ref: ${generatedRef}, Folio: ${generatedFolio}).`,
+        actorName: staffName,
+        actorRole: account?.type || "employee",
         targetType: "booking",
         targetId: bookingId,
       });
@@ -711,19 +807,36 @@ export class BookingController {
       await notify({
         type: "payment",
         title: `Checkout & Payment: ${paymentBy}`,
-        message: `Payment of ₱${paidAmount} received via ${method || "Cash"} (Ref: ${generatedRef}, Folio: ${generatedFolio}).${balanceNote}`,
-        severity: remainingBalance > 0 ? "warning" : "success",
+        message:
+          appliedAmount > 0
+            ? `Payment of ₱${appliedAmount} received via ${paymentMethod} (Ref: ${generatedRef}, Folio: ${generatedFolio}).`
+            : `Guest checked out with the balance already settled (Ref: ${generatedRef}).`,
+        severity: "success",
         link: "/pages/admin/payments",
         targetType: "booking",
         targetId: bookingId,
       });
 
-      response.send("success");
+      response.send({
+        success: true,
+        bookingId,
+        status: claimed.status,
+        checkedOutAt,
+        departureDate,
+        nights,
+        totalAmount,
+        previouslyPaid,
+        amountCollected: appliedAmount,
+        amountTendered: paidAmount,
+        change: changeDue,
+        balance: 0,
+        refNumber: generatedRef,
+        folio: generatedFolio,
+        paymentMethod,
+      });
     } catch (error) {
-      console.log("Failed to update booking: " + (error as Error).message);
-      response
-        .status(500)
-        .send("Failed to update booking: " + (error as Error).message);
+      console.log("Failed to check out guest: " + (error as Error).message);
+      response.status(500).send("Failed to check out guest");
     }
   };
 
@@ -786,12 +899,30 @@ export class BookingController {
 
       const generatedFolio = generateFolio(bookingId);
 
-      await BookingService.updatePaymentInfo(bookingId, {
-        paymentAmount: newPaidAmount,
-        paymentMethod: method || "Cash",
-        paymentRefNumber: generatedRef,
-        totalAmount,
-      });
+      const claimed = await BookingsModel.findOneAndUpdate(
+        {
+          _id: bookingId,
+          status: "active",
+          paymentAmount: alreadyPaid === 0 ? { $in: [0, null] } : alreadyPaid,
+        },
+        {
+          $set: {
+            paymentAmount: newPaidAmount,
+            paymentMethod: method || "Cash",
+            paymentRefNumber: generatedRef,
+            totalAmount,
+          },
+        },
+      );
+
+      if (!claimed) {
+        response
+          .status(409)
+          .send(
+            "This booking was updated by another request. Refresh and try again.",
+          );
+        return;
+      }
 
       await Paymentservice.create({
         amount: paidAmount,

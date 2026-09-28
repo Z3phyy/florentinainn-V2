@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Coins, Loader2, Wallet, Banknote, Smartphone, Globe, ReceiptText, User, CalendarDays, Bed } from "lucide-react";
 import useUserStore from "@/app/store/useUserStore";
+import { getApiErrorMessage } from "@/app/utils/apiError";
 
 interface Props {
   booking: bookingInterface;
@@ -38,8 +39,8 @@ export function PartialPaymentModal({ booking }: Props) {
   const room = booking.room;
   const nights = Math.max(1, getDaysFromDate(booking.arrivalDate));
 
-  const discountedPrice = room.price * (1 - (room.discount || 0) / 100);
-  const totalBill = Math.max(0, discountedPrice * nights);
+  const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
+  const totalBill = Math.max(0, Math.round(discountedPrice * nights));
   const alreadyPaid = Math.max(0, booking.paymentAmount || 0);
   const remainingBalance = Math.max(0, totalBill - alreadyPaid);
 
@@ -61,6 +62,7 @@ export function PartialPaymentModal({ booking }: Props) {
       queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation-history"] });
       const balance = response?.data?.balance ?? 0;
       successAlert(
         balance > 0
@@ -72,12 +74,11 @@ export function PartialPaymentModal({ booking }: Props) {
       setRefNumber("");
       setPaymentMethod("Cash");
     },
-    onError: (err: { response?: { data?: string | { message?: string } } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : err.response?.data?.message || "Failed to record partial payment.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to record partial payment."));
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
+      }
     },
   });
 

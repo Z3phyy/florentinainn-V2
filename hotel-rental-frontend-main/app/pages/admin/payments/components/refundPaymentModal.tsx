@@ -2,13 +2,18 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { paymentInterface } from "@/app/types/payment.type";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { refundSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/formField";
 import {
   Dialog,
   DialogContent,
@@ -23,8 +28,12 @@ import { Loader2, RotateCcw, Undo2 } from "lucide-react";
 export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
-  const [reason, setReason] = useState("");
-  const [note, setNote] = useState("");
+  const form = useForm<z.input<typeof refundSchema>>({
+    resolver: zodResolver(refundSchema),
+    mode: "onTouched",
+    defaultValues: { reason: "", note: "" },
+  });
+  const errors = form.formState.errors;
   const isRefunded = payment.status === "refunded";
 
   const refundMutation = useMutation({
@@ -34,9 +43,9 @@ export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
       successAlert("Refund recorded.");
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       setOpen(false);
+      form.reset();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to record refund."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to record refund.")),
   });
 
   const restoreMutation = useMutation({
@@ -47,12 +56,17 @@ export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       setOpen(false);
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to restore payment."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to restore payment.")),
   });
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) form.reset();
+      }}
+    >
       {isRefunded ? (
         <Button
           variant="outline"
@@ -116,31 +130,33 @@ export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
           </div>
         ) : (
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              refundMutation.mutate({ paymentId: payment._id, reason, note });
-            }}
+            onSubmit={form.handleSubmit((values) =>
+              refundMutation.mutate({
+                paymentId: payment._id,
+                reason: values.reason.trim(),
+                note: (values.note || "").trim(),
+              }),
+            )}
             className="space-y-4"
+            noValidate
           >
-            <div className="space-y-1.5">
-              <Label htmlFor="refundReason">Refund Reason</Label>
+            <FormField id="refundReason" label="Refund Reason" required error={errors.reason?.message}>
               <Textarea
                 id="refundReason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
                 rows={2}
                 placeholder="e.g. Guest canceled, duplicate payment, overcharge"
+                aria-invalid={!!errors.reason}
+                {...form.register("reason")}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="refundRef">Reference No. (optional)</Label>
+            </FormField>
+            <FormField id="refundRef" label="Reference No." error={errors.note?.message} hint="Optional — bank transaction or voucher reference.">
               <Input
                 id="refundRef"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
                 placeholder="e.g. bank transaction or voucher ref"
+                aria-invalid={!!errors.note}
+                {...form.register("note")}
               />
-            </div>
+            </FormField>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel

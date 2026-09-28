@@ -8,6 +8,10 @@ const route = Router()
 
 route.post("/", authLimiter, AccountController.createAccount)
 route.post("/login", authLimiter, AccountController.login)
+route.post("/login/access-code", authLimiter, AccountController.verifyAccessCode)
+route.post("/login/access-code/setup", authLimiter, AccountController.setupAccessCode)
+route.post("/staff", authenticateJWT, requireAdmin, AccountController.createStaffAccount)
+route.put("/access-code", authenticateJWT, requireAdmin, AccountController.setStaffAccessCode)
 route.get("/check-email/:email", authLimiter, AccountController.checkEmailAvailability)
 route.get("/permissions", authenticateJWT, requireAdmin, AccountController.getPermissionMatrix)
 

@@ -20,7 +20,16 @@ import { initSSE } from "../utils/sse";
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import { sendOtpEmail, sendContactInquiryEmail } from "../utils/sendEmail";
-import { validatePassword, validateEmail } from "../utils/validation";
+import {
+  validatePassword,
+  validateEmail,
+  validateAccessCode,
+  normalizeAccessCode,
+  isValidObjectId,
+} from "../utils/validation";
+import { AccessCodeService } from "../services/accessCode.service";
+import { LoginAttemptService } from "../services/loginAttempt.service";
+import { EMAIL_POLICY } from "../config/loginPolicy";
 
 // Escape user-supplied text so it is treated as a literal string, not a regex
 // pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
@@ -29,93 +38,6 @@ function escapeRegex(value: string): string {
 }
 
 export class SystemController {
-
-   static createBackup = async (request : AuthRequest , response : Response) => {
-     try {
-       const db = mongoose.connection.db;
-       if (!db) {
-         response.status(500).send("Database connection unavailable");
-         return;
-       }
-       const collections = await db.listCollections().toArray();
-       const backup: Record<string, any[]> = {};
-       for (const collection of collections) {
-         const docs = await db
-           .collection(collection.name)
-           .find({})
-           .limit(5000)
-           .toArray();
-         backup[collection.name] = docs;
-       }
-       const payload = {
-         exportedAt: new Date().toISOString(),
-         database: db.databaseName,
-         collections: backup,
-       };
-       await logAuditAction({
-         action: "BACKUP_CREATED",
-         details: `Exported ${collections.length} collection(s) from the database`,
-         actorName: request.account?.name || "Administrator",
-         actorRole: request.account?.type || "admin",
-         targetType: "system",
-       });
-       response.send(payload);
-     } catch (error) {
-       console.log("Failed to create backup: " + (error as Error).message);
-       response.status(500).send("Failed to create backup: " + (error as Error).message);
-     }
-   };
-
-   static restoreBackup = async (request : AuthRequest , response : Response) => {
-     try {
-       const { collections } = request.body;
-       if (!collections || typeof collections !== "object" || Array.isArray(collections)) {
-         response.status(400).send("Invalid backup payload. Provide a collections object.");
-         return;
-       }
-
-       const collectionNames = Object.keys(collections);
-       if (collectionNames.length === 0) {
-         response.status(400).send("Backup payload has no collections");
-         return;
-       }
-
-       // Never restore into system-only collections that would break auth.
-       const RESTORE_EXCLUDED = new Set(["admins", "loginattempts"]);
-       const db = mongoose.connection.db;
-       if (!db) {
-         response.status(500).send("Database connection unavailable");
-         return;
-       }
-
-       let insertedCount = 0;
-       for (const name of collectionNames) {
-         if (RESTORE_EXCLUDED.has(name.toLowerCase())) continue;
-         const docs = collections[name];
-         if (!Array.isArray(docs) || docs.length === 0) continue;
-         try {
-           await db.collection(name).deleteMany({});
-           await db.collection(name).insertMany(docs, { ordered: false });
-           insertedCount += docs.length;
-         } catch (err) {
-           console.warn("Skipped restore for collection " + name + ": " + (err as Error).message);
-         }
-       }
-
-       await logAuditAction({
-         action: "BACKUP_RESTORED",
-         details: `Restored ${insertedCount} document(s) across ${collectionNames.length} collection(s)`,
-         actorName: request.account?.name || "Administrator",
-         actorRole: request.account?.type || "admin",
-         targetType: "system",
-       });
-
-       response.send({ success: true, insertedCount, restoredCollections: collectionNames.length });
-     } catch (error) {
-       console.log("Failed to restore backup: " + (error as Error).message);
-       response.status(500).send("Failed to restore backup: " + (error as Error).message);
-     }
-   };
 
    static getAllPayments = async (request : AuthRequest , response : Response) => {
       const { page, limit, search } = request.query;
@@ -129,10 +51,22 @@ export class SystemController {
 
    static refundPayment = async (request : AuthRequest , response : Response) => {
      try {
-       const { paymentId, reason, note } = request.body;
+       const { paymentId } = request.body || {};
+       const reason = typeof request.body?.reason === "string" ? request.body.reason.trim() : "";
+       const note = typeof request.body?.note === "string" ? request.body.note.trim() : "";
 
-       if (!paymentId) {
+       if (!isValidObjectId(paymentId)) {
          response.status(400).send("Payment id is required");
+         return;
+       }
+
+       if (reason.length < 3 || reason.length > 300) {
+         response.status(400).send("A refund reason of 3-300 characters is required");
+         return;
+       }
+
+       if (note.length > 100) {
+         response.status(400).send("Reference number must be at most 100 characters");
          return;
        }
 
@@ -152,11 +86,16 @@ export class SystemController {
 
        const refundRef = note || `RFN-${paymentId.slice(-6).toUpperCase()}`;
 
-       await Paymentservice.markRefunded(paymentId, {
+       const refunded = await Paymentservice.markRefunded(paymentId, {
          refundedBy,
-         refundReason: reason || "",
+         refundReason: reason,
          refundRef,
        });
+
+       if (!refunded) {
+         response.status(409).send("This payment has already been refunded");
+         return;
+       }
 
        await logAuditAction({
          action: "PAYMENT_REFUNDED",
@@ -246,24 +185,29 @@ export class SystemController {
        const admins = await AdminService.getAll();
        const hasAdmin = admins.some((a) => a.type === "admin");
        const hasSuperAdmin = admins.some((a) => a.type === "super admin");
-       const allRegistered = hasAdmin && hasSuperAdmin;
 
        response.send({
-         canRegister: !allRegistered,
+         canRegister: !hasSuperAdmin,
          hasAdmin,
          hasSuperAdmin,
-         admins: admins.map((a) => ({ _id: a._id, email: a.email, type: a.type })),
        });
      } catch (error) {
        console.log("Failed to check admin status: " + (error as Error).message);
-       response.status(500).send("Failed to check admin status: " + (error as Error).message);
+       response.status(500).send("Failed to check admin status");
      }
    };
 
    static getAdmins = async (request: AuthRequest, response: Response) => {
      try {
        const admins = await AdminService.getAllAdmins();
-       response.send(admins.map((a) => a.toObject()));
+       response.send(
+         admins.map((a) => {
+           const plain: Record<string, unknown> = a.toObject();
+           delete plain.accessCodeHash;
+           plain.hasAccessCode = !!plain.accessCodeUpdatedAt;
+           return plain;
+         }),
+       );
      } catch (error) {
        console.log("Failed to get admins: " + (error as Error).message);
        response.status(500).send("Failed to get admins");
@@ -272,33 +216,314 @@ export class SystemController {
 
    static toggleAdminActive = async (request: AuthRequest, response: Response) => {
      try {
-       const { _id, isActive } = request.body;
-       if (!_id) {
-         response.status(400).send("Admin id is required");
+       const { _id, isActive } = request.body || {};
+       const reason =
+         typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : "";
+       const action: string =
+         typeof request.body?.action === "string"
+           ? request.body.action
+           : isActive === false
+             ? "deactivate"
+             : "reactivate";
+
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       if (!["suspend", "unsuspend", "deactivate", "reactivate"].includes(action)) {
+         response.status(400).json({ message: "Invalid account action." });
+         return;
+       }
+       if (_id === request.account?._id) {
+         response.status(400).json({ message: "You cannot change the status of your own account." });
          return;
        }
        const admin = await AdminService.get(_id);
        if (!admin) {
-         response.status(404).send("Admin not found");
+         response.status(404).json({ message: "Admin not found" });
          return;
        }
-       if (admin.type === "super admin" && isActive === false) {
-         response.status(400).send("The super admin cannot be deactivated");
+       if (admin.type === "super admin") {
+         response.status(400).json({ message: "The super admin account cannot be suspended or deactivated." });
          return;
        }
-       await AdminService.setActive(_id, Boolean(isActive));
+
+       const actorName = request.account?.name || "Super Admin";
+       let auditAction = "";
+       let details = "";
+
+       if (action === "suspend") {
+         if (admin.isActive === false) {
+           response.status(400).json({ message: "Admin access has already been revoked." });
+           return;
+         }
+         if (admin.isSuspended) {
+           response.status(400).json({ message: "Admin is already suspended." });
+           return;
+         }
+         await AdminService.suspend(_id, reason, actorName);
+         auditAction = "ADMIN_SUSPENDED";
+         details = `Suspended admin ${admin.email}${reason ? ` — ${reason}` : ""}`;
+       } else if (action === "unsuspend") {
+         if (!admin.isSuspended) {
+           response.status(400).json({ message: "Admin is not suspended." });
+           return;
+         }
+         await AdminService.unsuspend(_id);
+         auditAction = "ADMIN_UNSUSPENDED";
+         details = `Unsuspended admin ${admin.email}`;
+       } else if (action === "deactivate") {
+         if (admin.isActive === false) {
+           response.status(400).json({ message: "Admin access has already been revoked." });
+           return;
+         }
+         await AdminService.deactivate(_id, actorName);
+         auditAction = "ADMIN_DEACTIVATED";
+         details = `Revoked access for admin ${admin.email}${reason ? ` — ${reason}` : ""}`;
+       } else {
+         if (admin.isActive !== false) {
+           response.status(400).json({ message: "Admin is already active." });
+           return;
+         }
+         await AdminService.reactivate(_id);
+         auditAction = "ADMIN_REACTIVATED";
+         details = `Reactivated admin ${admin.email}`;
+       }
+
        await logAuditAction({
-         action: isActive === false ? "ADMIN_DEACTIVATED" : "ADMIN_REACTIVATED",
-         details: `${isActive === false ? "Deactivated" : "Reactivated"} admin ${admin.email}`,
-         actorName: request.account?.name || "Super Admin",
-         actorRole: request.account?.type || "admin",
+         action: auditAction,
+         details,
+         actorName,
+         actorRole: request.account?.type || "super admin",
          targetType: "admin",
          targetId: _id,
        });
        response.send({ message: "Admin status updated" });
      } catch (error) {
-       console.log("Failed to toggle admin: " + (error as Error).message);
-       response.status(500).send("Failed to toggle admin");
+       console.log("Failed to update admin status: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update admin status" });
+     }
+   };
+
+   static createAdminAccount = async (request: AuthRequest, response: Response) => {
+     try {
+       const body = request.body || {};
+       const name = typeof body.name === "string" ? body.name.trim() : "";
+       const email = typeof body.email === "string" ? body.email.trim() : "";
+       const password = typeof body.password === "string" ? body.password : "";
+
+       if (!name) {
+         response.status(400).json({ message: "Name is required." });
+         return;
+       }
+       const emailError = validateEmail(email);
+       if (emailError) {
+         response.status(400).json({ message: emailError });
+         return;
+       }
+       const passError = validatePassword(password);
+       if (passError) {
+         response.status(400).json({ message: passError });
+         return;
+       }
+       const accessCode = normalizeAccessCode(body.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(body.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       if (await AdminService.getByEmail(email)) {
+         response.status(400).json({ message: "Email already used by an admin account" });
+         return;
+       }
+       if (await AccountService.checkEmail(email)) {
+         response.status(400).json({ message: "Email already used by a staff account" });
+         return;
+       }
+
+       const admin = await AdminService.create({
+         name,
+         email,
+         password: await bcrypt.hash(password, 10),
+         otp: null,
+         type: "admin",
+       });
+       if (!admin) {
+         response.status(409).json({
+           message: "An admin account already exists. Revoke and remove it before creating a replacement.",
+         });
+         return;
+       }
+       await AccessCodeService.set("admin", String(admin._id), accessCode);
+
+       await logAuditAction({
+         action: "ADMIN_CREATED",
+         details: `Created admin account ${email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: String(admin._id),
+       });
+       response.status(201).json({ message: "Admin account created" });
+     } catch (error) {
+       console.log("Failed to create admin account: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to create admin account" });
+     }
+   };
+
+   static removeAdminAccount = async (request: AuthRequest, response: Response) => {
+     try {
+       const { _id } = request.body || {};
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       const admin = await AdminService.get(_id);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       if (admin.type === "super admin") {
+         response.status(400).json({ message: "The super admin account cannot be removed." });
+         return;
+       }
+       if (admin.isActive !== false) {
+         response.status(400).json({ message: "Revoke the admin's access before removing the account." });
+         return;
+       }
+       await AdminService.delete(_id);
+       await logAuditAction({
+         action: "ADMIN_REMOVED",
+         details: `Permanently removed admin account ${admin.email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: _id,
+       });
+       response.send({ message: "Admin account removed" });
+     } catch (error) {
+       console.log("Failed to remove admin: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to remove admin account" });
+     }
+   };
+
+   static setAdminAccessCode = async (request: AuthRequest, response: Response) => {
+     try {
+       const { _id } = request.body || {};
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       const accessCode = normalizeAccessCode(request.body?.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(request.body?.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       const admin = await AdminService.get(_id);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       if (admin.type === "super admin" && _id !== request.account?._id) {
+         response.status(403).json({ message: "You cannot change another super admin's access code." });
+         return;
+       }
+       const { accessCodeUpdatedAt } = await AccessCodeService.set("admin", _id, accessCode);
+       await LoginAttemptService.reset([`access:${_id}`]);
+       await logAuditAction({
+         action: "ADMIN_ACCESS_CODE_CHANGED",
+         details: `Access code updated for admin ${admin.email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: _id,
+       });
+       response.send({ message: "Admin access code updated.", accessCodeUpdatedAt });
+     } catch (error) {
+       console.log("Failed to set admin access code: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update access code" });
+     }
+   };
+
+   static getOwnAccessCodeStatus = async (request: AuthRequest, response: Response) => {
+     try {
+       const admin = await AdminService.get(request.account?._id || "");
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       response.send({
+         hasAccessCode: !!admin.accessCodeUpdatedAt,
+         accessCodeUpdatedAt: admin.accessCodeUpdatedAt || null,
+       });
+     } catch (error) {
+       response.status(500).json({ message: "Failed to load access code status" });
+     }
+   };
+
+   static changeOwnAccessCode = async (request: AuthRequest, response: Response) => {
+     try {
+       const adminId = request.account?._id || "";
+       const currentPassword =
+         typeof request.body?.currentPassword === "string" ? request.body.currentPassword : "";
+       if (!currentPassword) {
+         response.status(400).json({ message: "Current password is required." });
+         return;
+       }
+       const accessCode = normalizeAccessCode(request.body?.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(request.body?.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       const admin = await AdminService.get(adminId);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+
+       const passwordKey = `access-change:${adminId}`;
+       const lockStatus = await LoginAttemptService.getStatus(passwordKey, EMAIL_POLICY);
+       if (lockStatus.locked) {
+         response.status(429).json({
+           message: `Too many incorrect password attempts. Try again in ${Math.ceil(lockStatus.retryAfterSeconds / 60)} minute(s).`,
+         });
+         return;
+       }
+       const isMatch = await bcrypt.compare(currentPassword, admin.password);
+       if (!isMatch) {
+         await LoginAttemptService.registerFailure(passwordKey, "access-change", EMAIL_POLICY);
+         response.status(400).json({ message: "Incorrect current password." });
+         return;
+       }
+       await LoginAttemptService.reset([passwordKey]);
+
+       const { accessCodeUpdatedAt } = await AccessCodeService.set("admin", adminId, accessCode);
+       await logAuditAction({
+         action: "ADMIN_ACCESS_CODE_CHANGED",
+         details: `${admin.email} changed their access code`,
+         actorName: request.account?.name || "Administrator",
+         actorRole: request.account?.type || "admin",
+         targetType: "admin",
+         targetId: adminId,
+       });
+       response.send({ message: "Access code updated.", accessCodeUpdatedAt });
+     } catch (error) {
+       console.log("Failed to change access code: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update access code" });
      }
    };
 
@@ -347,6 +572,12 @@ export class SystemController {
 
       if (type !== "admin" && type !== "super admin") {
         response.status(400).send("Invalid admin type")
+        return
+      }
+
+      const existingAdmins = await AdminService.getAll()
+      if (existingAdmins.some((a) => a.type === "super admin")) {
+        response.status(403).send("Public admin registration is closed. The super admin creates administrator accounts from System Configuration.")
         return
       }
 
@@ -510,7 +741,7 @@ export class SystemController {
       }
 
       const admin = await AdminService.getByEmail(currentEmail)
-      if (!admin) {
+      if (!admin || String(admin._id) !== request.account?._id) {
         response.status(404).send("Admin account not found")
         return
       }

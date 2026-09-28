@@ -1,21 +1,41 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { systemInterface } from "@/app/types/system.type";
 import useUserStore from "@/app/store/useUserStore";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { systemSettingsSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FieldError, RequiredMark } from "@/components/ui/formField";
 import { LogoUploadModal } from "@/components/ui/logoUploadModal";
 import { SystemImageUploadModal } from "@/components/ui/systemImageUploadModal";
 import { AdminAccounts } from "./components/adminAccounts";
 import { BackupRestore } from "./components/backupRestore";
+import { AccessCodeSettings } from "./components/accessCodeSettings";
 import { Loader2, Save, Building2, Sparkles, Layout } from "lucide-react";
+
+type SettingsValues = z.input<typeof systemSettingsSchema>;
+
+const toFormValues = (info?: systemInterface): SettingsValues => ({
+  systemInfo: info?.systemInfo || "",
+  paymentMin: info?.paymentMin?.toString() || "0",
+  gracePeriodHours: info?.gracePeriodHours?.toString() || "2",
+  systemName: info?.systemName || "",
+  header: info?.header || "",
+  description: info?.description || "",
+  facebook: info?.facebook || "",
+  contactEmail: info?.contactEmail || "",
+});
 
 export default function Page() {
   const queryClient = useQueryClient();
@@ -29,28 +49,22 @@ export default function Page() {
     },
   });
 
-  const [systemInfoField, setSystemInfoField] = useState("");
-  const [paymentMin, setPaymentMin] = useState("");
-  const [gracePeriodHours, setGracePeriodHours] = useState("");
-  const [systemName, setSystemName] = useState("");
-  const [header, setHeader] = useState("");
-  const [description, setDescription] = useState("");
-  const [facebook, setFacebook] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isDirty },
+  } = useForm<SettingsValues>({
+    resolver: zodResolver(systemSettingsSchema),
+    mode: "onTouched",
+    defaultValues: toFormValues(),
+  });
 
-  // Populate form when data loads
   useEffect(() => {
     if (systemInfo) {
-      setSystemInfoField(systemInfo.systemInfo || "");
-      setPaymentMin(systemInfo.paymentMin?.toString() || "");
-      setGracePeriodHours(systemInfo.gracePeriodHours?.toString() || "2");
-      setSystemName(systemInfo.systemName || "");
-      setHeader(systemInfo.header || "");
-      setDescription(systemInfo.description || "");
-      setFacebook(systemInfo.facebook || "");
-      setContactEmail(systemInfo.contactEmail || "");
+      reset(toFormValues(systemInfo));
     }
-  }, [systemInfo]);
+  }, [systemInfo, reset]);
 
   const updateMutation = useMutation({
     mutationFn: (data: {
@@ -67,41 +81,22 @@ export default function Page() {
       successAlert("System settings saved successfully.");
       queryClient.invalidateQueries({ queryKey: ["systeminfo"] });
     },
-    onError: (err: { response?: { data?: { message?: string } } }) => {
-      const message = err.response?.data?.message || "Failed to save settings.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to save settings."));
     },
   });
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!systemName) {
-      errorAlert("System name is required.");
-      return;
-    }
-
+  const handleSave = handleSubmit((values) => {
+    const parsed = systemSettingsSchema.parse(values);
     updateMutation.mutate({
-      systemInfo: systemInfoField,
-      paymentMin: Number(paymentMin) || 0,
-      gracePeriodHours: Number(gracePeriodHours) || 2,
-      systemName,
-      header,
-      description,
-      facebook,
-      contactEmail,
+      ...parsed,
+      paymentMin: Number(parsed.paymentMin),
+      gracePeriodHours: Number(parsed.gracePeriodHours),
     });
-  };
+  });
 
-  const hasChanges =
-    systemInfoField !== (systemInfo?.systemInfo ?? "") ||
-    paymentMin !== (systemInfo?.paymentMin?.toString() ?? "") ||
-    gracePeriodHours !== (systemInfo?.gracePeriodHours?.toString() ?? "") ||
-    systemName !== (systemInfo?.systemName ?? "") ||
-    header !== (systemInfo?.header ?? "") ||
-    description !== (systemInfo?.description ?? "") ||
-    facebook !== (systemInfo?.facebook ?? "") ||
-    contactEmail !== (systemInfo?.contactEmail ?? "");
+  const hasChanges = isDirty;
+  const inputCls = "mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium";
 
   return (
     <div className="space-y-8">
@@ -137,7 +132,7 @@ export default function Page() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* ── Left Column: System Branding & Business Details ── */}
           <div className="lg:col-span-12 space-y-8">
-            <form onSubmit={handleSave} className="space-y-8">
+            <form onSubmit={handleSave} className="space-y-8" noValidate>
               {/* Branding & Background Banners */}
               <section className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-6 space-y-6 shadow-xs">
                 <div>
@@ -248,25 +243,26 @@ export default function Page() {
                 <div className="space-y-3">
                   <div>
                     <Label htmlFor="systemName" className="text-xs font-bold text-[#130005] dark:text-white">
-                      Hotel Name <span className="text-rose-600">*</span>
+                      Hotel Name <RequiredMark />
                     </Label>
                     <Input
                       id="systemName"
-                      value={systemName}
-                      onChange={(e) => setSystemName(e.target.value)}
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
-                      required
+                      className={inputCls}
+                      aria-invalid={!!errors.systemName}
+                      {...register("systemName")}
                     />
+                    <FieldError message={errors.systemName?.message} />
                   </div>
 
                   <div>
                     <Label htmlFor="header" className="text-xs font-bold text-[#130005] dark:text-white">Hero Tagline</Label>
                     <Input
                       id="header"
-                      value={header}
-                      onChange={(e) => setHeader(e.target.value)}
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                      className={inputCls}
+                      aria-invalid={!!errors.header}
+                      {...register("header")}
                     />
+                    <FieldError message={errors.header?.message} />
                   </div>
 
                   <div>
@@ -277,11 +273,12 @@ export default function Page() {
                     <Input
                       id="facebook"
                       type="url"
-                      value={facebook}
-                      onChange={(e) => setFacebook(e.target.value)}
                       placeholder="https://www.facebook.com/yourpage"
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                      className={inputCls}
+                      aria-invalid={!!errors.facebook}
+                      {...register("facebook")}
                     />
+                    <FieldError message={errors.facebook?.message} />
                   </div>
 
                   <div>
@@ -292,16 +289,17 @@ export default function Page() {
                     <Input
                       id="contactEmail"
                       type="email"
-                      value={contactEmail}
-                      onChange={(e) => setContactEmail(e.target.value)}
                       placeholder="reception@hotel.com"
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                      className={inputCls}
+                      aria-invalid={!!errors.contactEmail}
+                      {...register("contactEmail")}
                     />
+                    <FieldError message={errors.contactEmail?.message} />
                   </div>
 
                   <div>
                     <Label htmlFor="paymentMin" className="text-xs font-bold text-[#130005] dark:text-white">
-                      Minimum Online Reservation Payment
+                      Minimum Online Reservation Payment <RequiredMark />
                     </Label>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
                       Amount guests pay upfront (Stripe / PayMongo) to confirm an online reservation. Defaults to ₱1,000.
@@ -310,16 +308,17 @@ export default function Page() {
                       id="paymentMin"
                       type="number"
                       min={0}
-                      value={paymentMin}
-                      onChange={(e) => setPaymentMin(e.target.value)}
                       placeholder="1000"
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                      className={inputCls}
+                      aria-invalid={!!errors.paymentMin}
+                      {...register("paymentMin")}
                     />
+                    <FieldError message={errors.paymentMin?.message} />
                   </div>
 
                   <div>
                     <Label htmlFor="gracePeriodHours" className="text-xs font-bold text-[#130005] dark:text-white">
-                      Reservation Grace Period (hours)
+                      Reservation Grace Period (hours) <RequiredMark />
                     </Label>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
                       How long a guest can arrive late (past the expected arrival time) before the reservation is marked OVERDUE and an overdue alert is sent. Defaults to 2.
@@ -329,22 +328,24 @@ export default function Page() {
                       type="number"
                       min={0}
                       step={0.5}
-                      value={gracePeriodHours}
-                      onChange={(e) => setGracePeriodHours(e.target.value)}
                       placeholder="2"
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium"
+                      className={inputCls}
+                      aria-invalid={!!errors.gracePeriodHours}
+                      {...register("gracePeriodHours")}
                     />
+                    <FieldError message={errors.gracePeriodHours?.message} />
                   </div>
 
                   <div>
                     <Label htmlFor="description" className="text-xs font-bold text-[#130005] dark:text-white">Description</Label>
                     <Textarea
                       id="description"
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
                       rows={2}
                       className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs leading-relaxed"
+                      aria-invalid={!!errors.description}
+                      {...register("description")}
                     />
+                    <FieldError message={errors.description?.message} />
                   </div>
 
                   <div>
@@ -356,11 +357,12 @@ export default function Page() {
                     </p>
                     <Textarea
                       id="systemInfo"
-                      value={systemInfoField}
-                      onChange={(e) => setSystemInfoField(e.target.value)}
                       rows={6}
                       className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs leading-relaxed font-mono"
+                      aria-invalid={!!errors.systemInfo}
+                      {...register("systemInfo")}
                     />
+                    <FieldError message={errors.systemInfo?.message} />
                   </div>
                 </div>
               </section>
@@ -390,12 +392,14 @@ export default function Page() {
               </div>
             </form>
 
-            {user?.type === "super admin" && (
-              <>
-                <AdminAccounts />
-                <BackupRestore />
-              </>
-            )}
+            <AccessCodeSettings />
+
+           {(user?.type === "super admin" || user?.type === "admin") && (
+  <>
+    <AdminAccounts />
+    <BackupRestore />
+  </>
+)}
           </div>
         </div>
       )}

@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useForm, useWatch } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { changeEmailSchema, changePasswordSchema } from "@/app/utils/schemas";
+import { FormField } from "@/components/ui/formField";
+import { PasswordInput } from "@/components/ui/passwordInput";
 import useUserStore from "@/app/store/useUserStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Loader2,
   KeyRound,
@@ -17,27 +22,25 @@ import {
   Mail,
   AtSign,
   RefreshCw,
-  Eye,
-  EyeOff,
 } from "lucide-react";
-import { validatePassword, validateEmail } from "@/app/utils/validation";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
-import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
 
 export default function Page() {
   const { user, setUser } = useUserStore();
-  const currentPasswordVisibility = usePasswordVisibility();
-  const newPasswordVisibility = usePasswordVisibility();
-  const confirmPasswordVisibility = usePasswordVisibility();
 
-  // ── Update Email form state ──
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-
-  // ── Change Password form state ──
-  const [currentPasswordForPass, setCurrentPasswordForPass] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const emailForm = useForm<z.input<typeof changeEmailSchema>>({
+    resolver: zodResolver(changeEmailSchema),
+    mode: "onTouched",
+    defaultValues: { newEmail: "", currentPassword: "" },
+  });
+  const passwordForm = useForm<z.input<typeof changePasswordSchema>>({
+    resolver: zodResolver(changePasswordSchema),
+    mode: "onTouched",
+    defaultValues: { currentPassword: "", password: "", confirmPassword: "" },
+  });
+  const emailErrors = emailForm.formState.errors;
+  const passwordErrors = passwordForm.formState.errors;
+  const newPassword = useWatch({ control: passwordForm.control, name: "password" }) || "";
 
   const updateEmailMutation = useMutation({
     mutationFn: (data: {
@@ -53,15 +56,10 @@ export default function Page() {
           email: response.data.admin.email,
         });
       }
-      setCurrentPassword("");
-      setNewEmail("");
+      emailForm.reset();
     },
-    onError: (err: { response?: { data?: string | { message?: string } } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : err.response?.data?.message || "Failed to update email.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to update email."));
     },
   });
 
@@ -73,76 +71,35 @@ export default function Page() {
     }) => axiosInstance.put("/system/admin/change-credentials", data),
     onSuccess: () => {
       successAlert("Password updated successfully.");
-      setCurrentPasswordForPass("");
-      setNewPassword("");
-      setConfirmPassword("");
+      passwordForm.reset();
     },
-    onError: (err: { response?: { data?: string | { message?: string } } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : err.response?.data?.message || "Failed to update password.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to update password."));
     },
   });
 
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!currentPassword) {
-      errorAlert("Please enter your current password to verify.");
+  const handleEmailSubmit = emailForm.handleSubmit((values) => {
+    const email = values.newEmail.trim();
+    if (email.toLowerCase() === (user?.email || "").toLowerCase()) {
+      emailForm.setError("newEmail", {
+        message: "New email must be different from your current email.",
+      });
       return;
     }
-
-    const email = newEmail.trim();
-    if (!email) {
-      errorAlert("Please enter your new email.");
-      return;
-    }
-
-    if (email === (user?.email || "")) {
-      errorAlert("New email must be different from your current email.");
-      return;
-    }
-
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      errorAlert(emailErr);
-      return;
-    }
-
     updateEmailMutation.mutate({
       currentEmail: user?.email || "",
-      currentPassword,
+      currentPassword: values.currentPassword,
       newEmail: email,
     });
-  };
+  });
 
-  const handlePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!currentPasswordForPass) {
-      errorAlert("Please enter your current password.");
-      return;
-    }
-
-    const passErr = validatePassword(newPassword);
-    if (passErr) {
-      errorAlert(passErr);
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      errorAlert("New passwords do not match.");
-      return;
-    }
-
+  const handlePasswordSubmit = passwordForm.handleSubmit((values) => {
     changePasswordMutation.mutate({
       currentEmail: user?.email || "",
-      currentPassword: currentPasswordForPass,
-      newPassword,
+      currentPassword: values.currentPassword,
+      newPassword: values.password,
     });
-  };
+  });
 
   const roleTitle =
     user?.type === "super admin" ? "Super Administrator" : "Administrator";
@@ -234,52 +191,27 @@ export default function Page() {
           </p>
         </div>
 
-        <form onSubmit={handleEmailSubmit} className="space-y-4">
+        <form onSubmit={handleEmailSubmit} className="space-y-4" noValidate>
           <div className="rounded-xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="profile-new-email" className="text-xs">
-                New Email
-              </Label>
+            <FormField id="profile-new-email" label="New Email" required error={emailErrors.newEmail?.message} labelClassName="text-xs">
               <Input
                 id="profile-new-email"
                 type="email"
+                autoComplete="email"
                 placeholder="newemail@hotel.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                required
+                aria-invalid={!!emailErrors.newEmail}
+                {...emailForm.register("newEmail")}
               />
-            </div>
-            <div className="relative">
-              <Label htmlFor="profile-verify-pass" className="text-xs">
-                Current Password
-              </Label>
-              <Input
+            </FormField>
+            <FormField id="profile-verify-pass" label="Current Password" required error={emailErrors.currentPassword?.message} labelClassName="text-xs">
+              <PasswordInput
                 id="profile-verify-pass"
-                type={currentPasswordVisibility.passwordInputType}
+                autoComplete="current-password"
                 placeholder="Enter your current password to verify"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                required
-                className="pr-10"
+                aria-invalid={!!emailErrors.currentPassword}
+                {...emailForm.register("currentPassword")}
               />
-
-              <button
-                type="button"
-                onClick={currentPasswordVisibility.togglePasswordVisibility}
-                aria-label={
-                  currentPasswordVisibility.showPassword
-                    ? "Hide password"
-                    : "Show password"
-                }
-                className="absolute right-0 -bottom-2 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {currentPasswordVisibility.showPassword ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-              </button>
-            </div>
+            </FormField>
           </div>
 
           <div className="flex justify-end">
@@ -315,107 +247,41 @@ export default function Page() {
           </p>
         </div>
 
-        <form onSubmit={handlePasswordSubmit} className="space-y-4">
+        <form onSubmit={handlePasswordSubmit} className="space-y-4" noValidate>
           <div className="rounded-xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-3">
-            <div className="relative">
-              <Label htmlFor="profile-current-pass" className="text-xs">
-                Current Password
-              </Label>
-              <Input
+            <FormField id="profile-current-pass" label="Current Password" required error={passwordErrors.currentPassword?.message} labelClassName="text-xs">
+              <PasswordInput
                 id="profile-current-pass"
-                type={currentPasswordVisibility.passwordInputType}
+                autoComplete="current-password"
                 placeholder="Enter your current password"
-                value={currentPasswordForPass}
-                onChange={(e) => setCurrentPasswordForPass(e.target.value)}
-                required
-                className="pr-10"
+                aria-invalid={!!passwordErrors.currentPassword}
+                {...passwordForm.register("currentPassword")}
               />
-
-              <button
-                type="button"
-                onClick={currentPasswordVisibility.togglePasswordVisibility}
-                aria-label={
-                  currentPasswordVisibility.showPassword
-                    ? "Hide password"
-                    : "Show password"
-                }
-                className="absolute right-0 -bottom-2 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {currentPasswordVisibility.showPassword ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-              </button>
-            </div>
-            <div className="relative">
-              <Label htmlFor="profile-new-pass" className="text-xs">
-                New Password
-              </Label>
-              <Input
+            </FormField>
+            <FormField id="profile-new-pass" label="New Password" required error={passwordErrors.password?.message} labelClassName="text-xs">
+              <PasswordInput
                 id="profile-new-pass"
-                type={newPasswordVisibility.passwordInputType}
+                autoComplete="new-password"
                 placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                className="pr-10"
+                aria-invalid={!!passwordErrors.password}
+                {...passwordForm.register("password", {
+                  onChange: () => {
+                    if (passwordForm.getFieldState("password").isTouched) passwordForm.trigger("password");
+                    if (passwordForm.getFieldState("confirmPassword").isTouched) passwordForm.trigger("confirmPassword");
+                  },
+                })}
               />
-
-              <button
-                type="button"
-                onClick={newPasswordVisibility.togglePasswordVisibility}
-                aria-label={
-                  newPasswordVisibility.showPassword
-                    ? "Hide password"
-                    : "Show password"
-                }
-                className="absolute right-0 -bottom-2 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {newPasswordVisibility.showPassword ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-              </button>
-            </div>
-
-            {newPassword && (
-              <>
-                <PasswordRequirements password={newPassword} />
-                <div className="relative">
-                  <Label htmlFor="profile-new-pass" className="text-xs">
-                    Repeat new password
-                  </Label>
-                  <Input
-                    id="profile-confirm-pass"
-                    type={confirmPasswordVisibility.passwordInputType}
-                    placeholder="Repeat new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    className="pr-10"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={confirmPasswordVisibility.togglePasswordVisibility}
-                    aria-label={
-                      confirmPasswordVisibility.showPassword
-                        ? "Hide password"
-                        : "Show password"
-                    }
-                    className="absolute right-0 -bottom-2 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {confirmPasswordVisibility.showPassword ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
-                </div>
-              </>
-            )}
+            </FormField>
+            {newPassword && <PasswordRequirements password={newPassword} />}
+            <FormField id="profile-confirm-pass" label="Repeat New Password" required error={passwordErrors.confirmPassword?.message} labelClassName="text-xs">
+              <PasswordInput
+                id="profile-confirm-pass"
+                autoComplete="new-password"
+                placeholder="Repeat new password"
+                aria-invalid={!!passwordErrors.confirmPassword}
+                {...passwordForm.register("confirmPassword")}
+              />
+            </FormField>
           </div>
 
           <div className="flex justify-end">

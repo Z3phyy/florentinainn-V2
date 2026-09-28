@@ -5,7 +5,6 @@ import {
   accountInterfaceInput,
 } from "../types/accounts.type";
 import { AccountService } from "../services/acccount.service";
-import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 
 import { AdminService } from "../services/admin.service";
@@ -17,15 +16,44 @@ import {
   EMAIL_POLICY,
   IP_POLICY,
   MAX_FAILED_ATTEMPTS,
+  ACCESS_CODE_POLICY,
+  ACCESS_CODE_IP_POLICY,
+  ACCESS_CODE_MAX_FAILED_ATTEMPTS,
+  ACCESS_CODE_CHALLENGE_TTL_SECONDS,
 } from "../config/loginPolicy";
-import { validatePassword, validateEmail } from "../utils/validation";
+import {
+  validatePassword,
+  validateEmail,
+  validateAccessCode,
+  normalizeAccessCode,
+  isValidObjectId,
+} from "../utils/validation";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
-import { getJwtSecret } from "../config/jwt";
+import {
+  AccountRole,
+  AccessCodeStage,
+  signChallengeToken,
+  signSessionToken,
+  verifyChallengeToken,
+} from "../utils/authToken";
+import { AccessCodeService, AccessCodeOwner } from "../services/accessCode.service";
+import { isStaffBlocked, isAdminBlocked } from "../middleware/auth";
 import { sendApprovalEmail, sendRejectionEmail } from "../utils/sendEmail";
-import { PERMISSION_VALUES, PERMISSION_MATRIX } from "../types/permission.type";
+import {
+  PERMISSION_VALUES,
+  PERMISSION_MATRIX,
+  normalizePermission,
+  PermissionValue,
+} from "../types/permission.type";
 
-const secret = getJwtSecret();
+const sanitizePermissions = (value: unknown): PermissionValue[] => {
+  if (!Array.isArray(value)) return [];
+  const normalized = value
+    .map((p) => (typeof p === "string" ? normalizePermission(p) : null))
+    .filter((p): p is PermissionValue => !!p);
+  return [...new Set(normalized)];
+};
 
 const lockoutPayload = (status: LockStatus) => ({
   locked: true,
@@ -36,53 +64,38 @@ const lockoutPayload = (status: LockStatus) => ({
   message: `Too many failed login attempts. Try again in ${Math.ceil(status.retryAfterSeconds / 60)} minute(s).`,
 });
 
+const accessCodeLockoutPayload = (status: LockStatus) => ({
+  locked: true,
+  code: "ACCESS_CODE_LOCKED",
+  lockedUntil: status.lockedUntil ? status.lockedUntil.toISOString() : null,
+  retryAfterSeconds: status.retryAfterSeconds,
+  remainingAttempts: 0,
+  maxAttempts: ACCESS_CODE_MAX_FAILED_ATTEMPTS,
+  message: `Too many invalid access code attempts. Try again in ${Math.ceil(status.retryAfterSeconds / 60)} minute(s).`,
+});
+
 export class AccountController {
   static createAccount = async (request: AuthRequest, response: Response) => {
-    const accountData: accountInterfaceInput = request.body;
+    const body = request.body || {};
+    const accountData: accountInterfaceInput = {
+      name: typeof body.name === "string" ? body.name.trim() : "",
+      position: typeof body.position === "string" ? body.position.trim() : "",
+      email: typeof body.email === "string" ? body.email.trim() : "",
+      password: typeof body.password === "string" ? body.password : "",
+      permisions: [],
+      isApproved: false,
+      isActive: true,
+      isSuspended: false,
+      otp: null,
+    };
 
-    // isApproved is a required schema field; the staff registration form sends it.
-    // Default to pending approval so an omitted value cannot crash the request.
-    if (typeof accountData.isApproved !== "boolean") {
-      accountData.isApproved = false;
-    }
-
-    // A public self-registration must never be able to grant itself
-    // permissions or skip the approval queue.
-    if (accountData.isApproved !== true) {
-      accountData.permisions = [];
-    } else if (!Array.isArray(accountData.permisions)) {
-      accountData.permisions = [];
-    }
-
-    accountData.isActive = true;
-    accountData.isSuspended = false;
-    accountData.position =
-      typeof accountData.position === "string" ? accountData.position.trim() : "";
-
-    const emailErr = validateEmail(accountData.email);
-    if (emailErr) {
-      response.status(400).send(emailErr);
+    const inputErr = await AccountController.validateNewStaff(accountData);
+    if (inputErr) {
+      response.status(400).send(inputErr);
       return;
     }
 
-    const passErr = validatePassword(accountData.password);
-    if (passErr) {
-      response.status(400).send(passErr);
-      return;
-    }
-
-    if (await AccountService.checkEmail(accountData.email)) {
-      response.status(400).send("Email already registered");
-      return;
-    }
-
-    if (await AdminService.getByEmail(accountData.email)) {
-      response.status(400).send("Email already registered in admin account");
-      return;
-    }
-
-    const hashedPassword = await bcrypt.hash(accountData.password, 10);
-    accountData.password = hashedPassword;
+    accountData.password = await bcrypt.hash(accountData.password, 10);
 
     const account = await AccountService.create(accountData);
     await logAuditAction({
@@ -102,7 +115,94 @@ export class AccountController {
       targetId: account._id ? String(account._id) : undefined,
     });
 
-    response.send(account);
+    response.send(AccountController.sanitize(account));
+  };
+
+  static createStaffAccount = async (request: AuthRequest, response: Response) => {
+    try {
+      const body = request.body || {};
+      const accountData: accountInterfaceInput = {
+        name: typeof body.name === "string" ? body.name.trim() : "",
+        position: typeof body.position === "string" ? body.position.trim() : "",
+        email: typeof body.email === "string" ? body.email.trim() : "",
+        password: typeof body.password === "string" ? body.password : "",
+        permisions: sanitizePermissions(body.permisions),
+        isApproved: true,
+        isActive: true,
+        isSuspended: false,
+        otp: null,
+      };
+
+      const inputErr = await AccountController.validateNewStaff(accountData);
+      if (inputErr) {
+        response.status(400).json({ message: inputErr });
+        return;
+      }
+
+      const accessCode = normalizeAccessCode(body.accessCode);
+      const codeErr = validateAccessCode(accessCode);
+      if (codeErr) {
+        response.status(400).json({ message: codeErr });
+        return;
+      }
+      if (accessCode !== normalizeAccessCode(body.confirmAccessCode)) {
+        response.status(400).json({ message: "Access codes do not match." });
+        return;
+      }
+
+      accountData.password = await bcrypt.hash(accountData.password, 10);
+      const account = await AccountService.create(accountData);
+      await AccessCodeService.set("staff", String(account._id), accessCode);
+
+      await logAuditAction({
+        action: "STAFF_CREATED",
+        details: `Created staff ${accountData.name} (${accountData.email}) with permissions: ${
+          accountData.permisions.join(", ") || "none"
+        }`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: String(account._id),
+      });
+
+      response.status(201).send(AccountController.sanitize(await AccountService.get(String(account._id))));
+    } catch (error) {
+      console.error("createStaffAccount error:", error);
+      response.status(500).json({ message: "Failed to create staff account" });
+    }
+  };
+
+  private static validateNewStaff = async (
+    data: accountInterfaceInput,
+  ): Promise<string | null> => {
+    if (!data.name) return "Name is required.";
+    if (data.name.length > 100) return "Name must be at most 100 characters.";
+    if ((data.position || "").length > 100) {
+      return "Position must be at most 100 characters.";
+    }
+    const emailErr = validateEmail(data.email);
+    if (emailErr) return emailErr;
+    const passErr = validatePassword(data.password);
+    if (passErr) return passErr;
+    if (await AccountService.checkEmail(data.email)) {
+      return "Email already registered";
+    }
+    if (await AdminService.getByEmail(data.email)) {
+      return "Email already registered in admin account";
+    }
+    return null;
+  };
+
+  private static sanitize = (doc: any) => {
+    if (!doc) return doc;
+    const plain = doc.toObject ? doc.toObject() : { ...doc };
+    delete plain.password;
+    delete plain.otp;
+    delete plain.otpExpiresAt;
+    delete plain.otpAttempts;
+    delete plain.accessCodeHash;
+    plain.hasAccessCode = !!plain.accessCodeUpdatedAt;
+    return plain;
   };
 
   static checkEmailAvailability = async (
@@ -216,20 +316,17 @@ export class AccountController {
         });
       };
 
-      // Check both employee account and admin account
       const account = await AccountService.checkEmail(email);
       const adminAccount = await AdminService.getByEmail(email);
 
-      // User does not exist
       if (!account && !adminAccount) {
         await failAndRespond(404, "User not found");
         return;
       }
 
       let authenticatedAccount: any = null;
-      let role: "super admin" | "admin" | "employee" = "employee";
+      let role: AccountRole = "employee";
 
-      // 1. Try checking Admin credentials first if admin exists
       if (adminAccount) {
         const isMatch = await bcrypt.compare(password, adminAccount.password);
         if (isMatch) {
@@ -238,24 +335,7 @@ export class AccountController {
         }
       }
 
-      // 2. If not authenticated as admin, try checking Staff/Employee credentials
       if (!authenticatedAccount && account) {
-        if (account.isApproved === false) {
-          response.status(403).json({ message: "Account is pending approval" });
-          return;
-        }
-        if (account.isSuspended === true) {
-          response.status(403).json({
-            message: account.suspensionReason
-              ? `Account is suspended: ${account.suspensionReason}`
-              : "Account is suspended",
-          });
-          return;
-        }
-        if (account.isActive === false) {
-          response.status(403).json({ message: "Account is deactivated" });
-          return;
-        }
         const isMatch = await bcrypt.compare(password, account.password);
         if (isMatch) {
           authenticatedAccount = account;
@@ -263,13 +343,6 @@ export class AccountController {
         }
       }
 
-      // Admin account deactivation guard
-      if (authenticatedAccount && adminAccount && adminAccount.isActive === false) {
-        await failAndRespond(403, "Admin account is deactivated");
-        return;
-      }
-
-      // If neither matched
       if (!authenticatedAccount) {
         await failAndRespond(401, "Incorrect password");
         return;
@@ -277,44 +350,320 @@ export class AccountController {
 
       await LoginAttemptService.reset([emailKey, ipKey]);
 
-      // Track last login + session version (used for force-logout/session revocation)
-      await AccountService.touchLastLogin(authenticatedAccount._id);
-      await AdminService.touchLastLogin(authenticatedAccount._id);
-      const sessionVersion = authenticatedAccount.sessionVersion || 0;
+      const blockStatus =
+        role === "employee"
+          ? isStaffBlocked(authenticatedAccount)
+          : isAdminBlocked(authenticatedAccount);
+      if (blockStatus.blocked) {
+        response
+          .status(403)
+          .json({ message: blockStatus.message, code: "ACCOUNT_DISABLED" });
+        return;
+      }
 
-      // Create token with id, role, and name
-      const token = jwt.sign(
-        {
-          id: authenticatedAccount._id,
-          role,
-          name:
-            authenticatedAccount.name ||
-            (role === "super admin"
-              ? "Super Admin"
-              : role === "admin"
-                ? "Admin"
-                : "Staff"),
-          sv: sessionVersion,
-        },
-        secret,
-        { expiresIn: "3d" },
-      );
+      const owner = role === "employee" ? "staff" : "admin";
+      const accountId = String(authenticatedAccount._id);
+      const hasAccessCode = await AccessCodeService.hasAccessCode(owner, accountId);
 
-      const safeAccount = authenticatedAccount?.toObject
-        ? authenticatedAccount.toObject()
-        : { ...authenticatedAccount };
-      delete safeAccount.password;
-      delete safeAccount.otp;
-      delete safeAccount.otpExpiresAt;
+      if (!hasAccessCode && role === "employee") {
+        response.status(403).json({
+          message:
+            "No access code has been assigned to your account yet. Please contact an administrator.",
+          code: "ACCESS_CODE_NOT_ASSIGNED",
+        });
+        return;
+      }
+
+      const stage: AccessCodeStage = hasAccessCode ? "verify" : "setup";
+      const challengeToken = signChallengeToken({
+        id: accountId,
+        role,
+        sv: authenticatedAccount.sessionVersion || 0,
+        stage,
+      });
 
       response.send({
-        account: safeAccount,
-        token,
+        requiresAccessCode: true,
+        stage,
         role,
+        challengeToken,
+        expiresInSeconds: ACCESS_CODE_CHALLENGE_TTL_SECONDS,
       });
     } catch (error) {
       console.error(error);
-      response.status(500).send("Server error");
+      response.status(500).json({ message: "Server error" });
+    }
+  };
+
+  private static resolveChallenge = async (
+    challengeToken: unknown,
+    expectedStage: AccessCodeStage,
+  ): Promise<
+    | { ok: true; doc: any; role: AccountRole; owner: AccessCodeOwner; id: string }
+    | { ok: false; status: number; body: Record<string, unknown> }
+  > => {
+    const challenge = verifyChallengeToken(challengeToken);
+    if (!challenge || challenge.stage !== expectedStage) {
+      return {
+        ok: false,
+        status: 401,
+        body: {
+          message: "Your sign-in session has expired. Please sign in again.",
+          code: "CHALLENGE_INVALID",
+        },
+      };
+    }
+
+    const owner: AccessCodeOwner = challenge.role === "employee" ? "staff" : "admin";
+    const doc: any =
+      owner === "staff"
+        ? await AccountService.get(challenge.id)
+        : await AdminService.get(challenge.id);
+
+    if (!doc || (owner === "admin" && doc.type !== challenge.role)) {
+      return {
+        ok: false,
+        status: 401,
+        body: {
+          message: "Your sign-in session has expired. Please sign in again.",
+          code: "CHALLENGE_INVALID",
+        },
+      };
+    }
+
+    const blockStatus =
+      owner === "staff" ? isStaffBlocked(doc) : isAdminBlocked(doc);
+    if (blockStatus.blocked) {
+      return {
+        ok: false,
+        status: 403,
+        body: { message: blockStatus.message, code: "ACCOUNT_DISABLED" },
+      };
+    }
+
+    if ((doc.sessionVersion || 0) !== challenge.sv) {
+      return {
+        ok: false,
+        status: 401,
+        body: {
+          message: "Your sign-in session has expired. Please sign in again.",
+          code: "CHALLENGE_INVALID",
+        },
+      };
+    }
+
+    return { ok: true, doc, role: challenge.role, owner, id: challenge.id };
+  };
+
+  private static completeLogin = async (
+    doc: any,
+    role: AccountRole,
+    response: Response,
+  ) => {
+    const id = String(doc._id);
+    if (role === "employee") {
+      await AccountService.touchLastLogin(id);
+    } else {
+      await AdminService.touchLastLogin(id);
+    }
+
+    const token = signSessionToken({
+      id,
+      role,
+      name:
+        doc.name ||
+        (role === "super admin"
+          ? "Super Admin"
+          : role === "admin"
+            ? "Admin"
+            : "Staff"),
+      sv: doc.sessionVersion || 0,
+    });
+
+    const safeAccount = doc?.toObject ? doc.toObject() : { ...doc };
+    delete safeAccount.password;
+    delete safeAccount.otp;
+    delete safeAccount.otpExpiresAt;
+    delete safeAccount.otpAttempts;
+    delete safeAccount.accessCodeHash;
+
+    response.send({
+      account: safeAccount,
+      token,
+      role,
+    });
+  };
+
+  static verifyAccessCode = async (request: AuthRequest, response: Response) => {
+    try {
+      const resolved = await AccountController.resolveChallenge(
+        request.body?.challengeToken,
+        "verify",
+      );
+      if (!resolved.ok) {
+        response.status(resolved.status).json(resolved.body);
+        return;
+      }
+      const { doc, role, owner, id } = resolved;
+
+      const codeKey = `access:${id}`;
+      const ipKey = `access-ip:${request.ip || "unknown"}`;
+
+      const codeStatus = await LoginAttemptService.getStatus(codeKey, ACCESS_CODE_POLICY);
+      const ipStatus = await LoginAttemptService.getStatus(ipKey, ACCESS_CODE_IP_POLICY);
+      const activeLock = codeStatus.locked ? codeStatus : ipStatus.locked ? ipStatus : null;
+      if (activeLock) {
+        response.status(429).json(accessCodeLockoutPayload(activeLock));
+        return;
+      }
+
+      const accessCode = normalizeAccessCode(request.body?.accessCode);
+      const isValid =
+        !validateAccessCode(accessCode) &&
+        (await AccessCodeService.verify(owner, id, accessCode));
+
+      if (!isValid) {
+        const codeFailure = await LoginAttemptService.registerFailure(
+          codeKey,
+          "access-code",
+          ACCESS_CODE_POLICY,
+        );
+        const ipFailure = await LoginAttemptService.registerFailure(
+          ipKey,
+          "access-code-ip",
+          ACCESS_CODE_IP_POLICY,
+        );
+        const lock = codeFailure.locked ? codeFailure : ipFailure.locked ? ipFailure : null;
+
+        if (lock) {
+          await logAuditAction({
+            action: "ACCESS_CODE_LOCKED",
+            details: `Access code verification locked after repeated failures for ${doc.email}`,
+            actorName: doc.email,
+            actorRole: role,
+            targetType: owner,
+            targetId: id,
+          });
+          response.status(429).json(accessCodeLockoutPayload(lock));
+          return;
+        }
+
+        response.status(401).json({
+          message: "Invalid access code",
+          code: "ACCESS_CODE_INVALID",
+          locked: false,
+          remainingAttempts: codeFailure.remainingAttempts,
+          maxAttempts: ACCESS_CODE_MAX_FAILED_ATTEMPTS,
+        });
+        return;
+      }
+
+      await LoginAttemptService.reset([codeKey]);
+      await AccountController.completeLogin(doc, role, response);
+    } catch (error) {
+      console.error("verifyAccessCode error:", error);
+      response.status(500).json({ message: "Server error" });
+    }
+  };
+
+  static setupAccessCode = async (request: AuthRequest, response: Response) => {
+    try {
+      const resolved = await AccountController.resolveChallenge(
+        request.body?.challengeToken,
+        "setup",
+      );
+      if (!resolved.ok) {
+        response.status(resolved.status).json(resolved.body);
+        return;
+      }
+      const { doc, role, owner, id } = resolved;
+
+      if (owner !== "admin") {
+        response.status(403).json({
+          message: "Only administrators can set up their own access code.",
+        });
+        return;
+      }
+
+      const accessCode = normalizeAccessCode(request.body?.accessCode);
+      const confirmAccessCode = normalizeAccessCode(request.body?.confirmAccessCode);
+      const codeErr = validateAccessCode(accessCode);
+      if (codeErr) {
+        response.status(400).json({ message: codeErr });
+        return;
+      }
+      if (accessCode !== confirmAccessCode) {
+        response.status(400).json({ message: "Access codes do not match." });
+        return;
+      }
+
+      const created = await AccessCodeService.setIfMissing(owner, id, accessCode);
+      if (!created) {
+        response.status(409).json({
+          message: "An access code is already configured. Please sign in again.",
+          code: "CHALLENGE_INVALID",
+        });
+        return;
+      }
+
+      await logAuditAction({
+        action: "ACCESS_CODE_INITIALIZED",
+        details: `Initial access code configured for ${doc.email}`,
+        actorName: doc.name || doc.email,
+        actorRole: role,
+        targetType: owner,
+        targetId: id,
+      });
+
+      await AccountController.completeLogin(doc, role, response);
+    } catch (error) {
+      console.error("setupAccessCode error:", error);
+      response.status(500).json({ message: "Server error" });
+    }
+  };
+
+  static setStaffAccessCode = async (request: AuthRequest, response: Response) => {
+    try {
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).json({ message: "A valid staff id is required." });
+        return;
+      }
+
+      const accessCode = normalizeAccessCode(request.body?.accessCode);
+      const confirmAccessCode = normalizeAccessCode(request.body?.confirmAccessCode);
+      const codeErr = validateAccessCode(accessCode);
+      if (codeErr) {
+        response.status(400).json({ message: codeErr });
+        return;
+      }
+      if (accessCode !== confirmAccessCode) {
+        response.status(400).json({ message: "Access codes do not match." });
+        return;
+      }
+
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).json({ message: "Staff account not found." });
+        return;
+      }
+
+      const { accessCodeUpdatedAt } = await AccessCodeService.set("staff", _id, accessCode);
+      await LoginAttemptService.reset([`access:${_id}`]);
+
+      await logAuditAction({
+        action: "STAFF_ACCESS_CODE_CHANGED",
+        details: `Access code updated for staff ${account.name} (${account.email})`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "staff",
+        targetId: _id,
+      });
+
+      response.send({ message: "Staff access code updated.", accessCodeUpdatedAt });
+    } catch (error) {
+      console.error("setStaffAccessCode error:", error);
+      response.status(500).json({ message: "Server error" });
     }
   };
 
@@ -347,14 +696,7 @@ export class AccountController {
         sortDir,
       });
 
-      const sanitize = (doc: any) => {
-        const plain = doc.toObject ? doc.toObject() : { ...doc };
-        delete plain.password;
-        delete plain.otp;
-        delete plain.otpExpiresAt;
-        delete plain.otpAttempts;
-        return plain;
-      };
+      const sanitize = AccountController.sanitize;
 
       if (hasPaging) {
         response.send({
@@ -377,79 +719,151 @@ export class AccountController {
 
   static updateAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id, name, email, password, permisions, position } = request.body;
+      const { _id, name, email, password, permisions, position } = request.body || {};
       const actorType = request.account?.type;
-      const updateData: any = {
-        name,
-        email,
-        isApproved: true,
-        otp: null,
-      };
 
-      if (typeof position === "string") {
-        updateData.position = position.trim();
+      if (!isValidObjectId(_id)) {
+        response.status(400).json({ message: "A valid staff id is required." });
+        return;
       }
 
-      // Only super admins may change staff permissions (permission matrix).
-      if (actorType === "super admin" && Array.isArray(permisions)) {
-        updateData.permisions = [...new Set<string>(permisions)];
+      const existing = await AccountService.get(_id);
+      if (!existing) {
+        response.status(404).json({ message: "Staff account not found." });
+        return;
       }
 
-      if (password && typeof password === "string" && password.trim() !== "") {
-        if (/^\$2[aby]\$/.test(password)) {
-          updateData.password = password;
-        } else {
-          updateData.password = await bcrypt.hash(password, 10);
+      const trimmedName = typeof name === "string" ? name.trim() : "";
+      if (!trimmedName) {
+        response.status(400).json({ message: "Name is required." });
+        return;
+      }
+      if (trimmedName.length > 100) {
+        response.status(400).json({ message: "Name must be at most 100 characters." });
+        return;
+      }
+
+      const normalizedEmail = typeof email === "string" ? email.trim() : "";
+      const emailErr = validateEmail(normalizedEmail);
+      if (emailErr) {
+        response.status(400).json({ message: emailErr });
+        return;
+      }
+
+      if (normalizedEmail !== String(existing.email || "")) {
+        const taken = await AccountService.checkEmail(normalizedEmail);
+        if (taken && String(taken._id) !== String(existing._id)) {
+          response.status(400).json({ message: "Email already registered to another staff account." });
+          return;
+        }
+        if (await AdminService.getByEmail(normalizedEmail)) {
+          response.status(400).json({ message: "Email already registered in admin account." });
+          return;
         }
       }
 
-      await AccountService.update(_id, updateData as accountInterfaceInput);
+      const updateData: Record<string, unknown> = {
+        name: trimmedName,
+        email: normalizedEmail,
+      };
+
+      if (typeof position === "string") {
+        if (position.trim().length > 100) {
+          response.status(400).json({ message: "Position must be at most 100 characters." });
+          return;
+        }
+        updateData.position = position.trim();
+      }
+
+      let permissionsChanged = false;
+      if (actorType === "super admin" && Array.isArray(permisions)) {
+        updateData.permisions = sanitizePermissions(permisions);
+        permissionsChanged = true;
+      }
+
+      let passwordChanged = false;
+      if (typeof password === "string" && password !== "") {
+        const passErr = validatePassword(password);
+        if (passErr) {
+          response.status(400).json({ message: passErr });
+          return;
+        }
+        updateData.password = await bcrypt.hash(password, 10);
+        passwordChanged = true;
+      }
+
+      await AccountService.update(
+        _id,
+        passwordChanged
+          ? ({ ...updateData, $inc: { sessionVersion: 1 } } as unknown as accountInterfaceInput)
+          : (updateData as unknown as accountInterfaceInput),
+      );
       await logAuditAction({
         action: "STAFF_UPDATED",
-        details: `Updated staff ${name || email}${
-          actorType === "super admin" ? " (incl. permissions)" : ""
-        }`,
+        details: `Updated staff ${trimmedName || normalizedEmail}${
+          permissionsChanged ? " (incl. permissions)" : ""
+        }${passwordChanged ? " (password reset)" : ""}`,
         actorName: request.account?.name || "Administrator",
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
       });
-      response.send({ message: "Staff updated" });
+      response.send({
+        message: "Staff updated",
+        account: AccountController.sanitize(await AccountService.get(_id)),
+      });
     } catch (error) {
       console.error("updateAccount error:", error);
-      response.status(500).send("Server error");
+      response.status(500).json({ message: "Server error" });
     }
   };
 
   static deleteAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const actorName = request.account?.name || "Administrator";
       const account = await AccountService.get(_id);
-      if (!account || account.isActive === false) {
-        response.status(400).send({ message: "Staff has already been deactivated" });
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (account.isActive === false) {
+        response.status(400).send({ message: "Staff access has already been revoked" });
         return;
       }
       await AccountService.deactivate(_id, actorName);
       await logAuditAction({
         action: "STAFF_DEACTIVATED",
-        details: `Deactivated staff account ${account.name} (${account.email})`,
+        details: `Revoked access for staff account ${account.name} (${account.email})`,
         actorName,
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
       });
-      response.send({ message: "Staff deactivated" });
+      response.send({ message: "Staff access revoked" });
     } catch (error) {
       console.error("deleteAccount error:", error);
-      response.status(500).send("Server error");
+      response.status(500).send({ message: "Server error" });
     }
   };
 
   // Hard deletion (super admin only use; normal "delete" is the soft deactivate above)
   static removeAccountPermanently = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
+      const account = await AccountService.get(_id);
+      if (!account) {
+        response.status(404).send({ message: "Account not found" });
+        return;
+      }
       await AccountService.delete(_id);
       await logAuditAction({
         action: "STAFF_DELETED",
@@ -468,9 +882,9 @@ export class AccountController {
 
   static approveAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
 
-      if (!_id) {
+      if (!isValidObjectId(_id)) {
         response.status(400).send("Account id is required");
         return;
       }
@@ -479,6 +893,11 @@ export class AccountController {
 
       if (!account) {
         response.status(404).send("Account not found");
+        return;
+      }
+
+      if (account.isApproved === true) {
+        response.status(400).send("Account is already approved");
         return;
       }
 
@@ -511,8 +930,7 @@ export class AccountController {
         targetId: _id,
       });
 
-      const accounts = await AccountService.getAll();
-      response.send(accounts);
+      response.send({ message: "Staff account approved" });
     } catch (error) {
       console.log("Failed to approve account: " + (error as Error).message);
       response
@@ -585,10 +1003,18 @@ export class AccountController {
 
   static reactivateAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const account = await AccountService.get(_id);
       if (!account) {
         response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (account.isActive !== false) {
+        response.status(400).send({ message: "Account is already active" });
         return;
       }
       await AccountService.reactivate(_id);
@@ -603,23 +1029,37 @@ export class AccountController {
       response.send({ message: "Staff reactivated" });
     } catch (error) {
       console.error("reactivateAccount error:", error);
-      response.status(500).send("Server error");
+      response.status(500).send({ message: "Server error" });
     }
   };
 
   static suspendAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id, reason } = request.body;
+      const { _id } = request.body || {};
+      const reason =
+        typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : "";
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const account = await AccountService.get(_id);
       if (!account) {
         response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (account.isApproved === false) {
+        response.status(400).send({ message: "Pending or rejected accounts cannot be suspended" });
+        return;
+      }
+      if (account.isActive === false) {
+        response.status(400).send({ message: "Account access has already been revoked" });
         return;
       }
       if (account.isSuspended) {
         response.status(400).send({ message: "Account is already suspended" });
         return;
       }
-      await AccountService.suspend(_id, reason || "", request.account?.name || "Administrator");
+      await AccountService.suspend(_id, reason, request.account?.name || "Administrator");
       await logAuditAction({
         action: "STAFF_SUSPENDED",
         details: `Suspended staff account ${account.name} (${account.email})${
@@ -633,16 +1073,24 @@ export class AccountController {
       response.send({ message: "Staff suspended" });
     } catch (error) {
       console.error("suspendAccount error:", error);
-      response.status(500).send("Server error");
+      response.status(500).send({ message: "Server error" });
     }
   };
 
   static unsuspendAccount = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const account = await AccountService.get(_id);
       if (!account) {
         response.status(404).send({ message: "Account not found" });
+        return;
+      }
+      if (!account.isSuspended) {
+        response.status(400).send({ message: "Account is not suspended" });
         return;
       }
       await AccountService.unsuspend(_id);
@@ -657,13 +1105,17 @@ export class AccountController {
       response.send({ message: "Staff unsuspended" });
     } catch (error) {
       console.error("unsuspendAccount error:", error);
-      response.status(500).send("Server error");
+      response.status(500).send({ message: "Server error" });
     }
   };
 
   static forceLogout = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const account = await AccountService.get(_id);
       if (!account) {
         response.status(404).send({ message: "Account not found" });
@@ -687,7 +1139,11 @@ export class AccountController {
 
   static resetStaffPassword = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id, newPassword } = request.body;
+      const { _id, newPassword } = request.body || {};
+      if (!isValidObjectId(_id)) {
+        response.status(400).send({ message: "A valid staff id is required." });
+        return;
+      }
       const account = await AccountService.get(_id);
       if (!account) {
         response.status(404).send({ message: "Account not found" });

@@ -17,6 +17,8 @@ export interface accountInterfaceInput {
     rejectedBy?: string,
     sessionVersion?: number,
     lastLogin?: string | null,
+    hasAccessCode?: boolean,
+    accessCodeUpdatedAt?: string | null,
     otp : string | null,
     type?: string,
 }
@@ -36,4 +38,18 @@ export interface accountListResult {
     page: number;
     limit: number;
     totalPages: number;
+}
+
+export interface adminAccountInterface {
+    _id: string;
+    name: string;
+    email: string;
+    type: string;
+    isActive: boolean;
+    isSuspended?: boolean;
+    suspensionReason?: string;
+    deactivatedAt?: string | null;
+    lastLogin?: string | null;
+    hasAccessCode?: boolean;
+    accessCodeUpdatedAt?: string | null;
 }

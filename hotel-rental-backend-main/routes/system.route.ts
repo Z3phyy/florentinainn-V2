@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { SystemController } from "../controller/system.controller";
+import { BackupController } from "../controller/backup.controller";
+import { handleBackupUpload } from "../utils/backupUpload";
 import { upload } from "../utils/upload";
 import { authenticateJWT, authenticateChatSender } from "../middleware/auth";
 import { requireAdmin, requireSuperAdmin, requirePermission } from "../middleware/requireAdmin";
@@ -21,12 +23,21 @@ route.post("/payments/restore", adminAuth, SystemController.restorePayment)
 route.put("/info", adminAuth, SystemController.updateSystemInfo)
 route.post("/logo", adminAuth, upload.single("logo"), SystemController.uploadLogo)
 route.post("/image", adminAuth, upload.single("image"), SystemController.uploadSystemImage)
-route.get("/backup", superAdminAuth, SystemController.createBackup)
-route.post("/backup/restore", superAdminAuth, SystemController.restoreBackup)
+route.get("/backups", superAdminAuth, BackupController.list)
+route.post("/backups", superAdminAuth, BackupController.create)
+route.post("/backups/upload", superAdminAuth, handleBackupUpload, BackupController.upload)
+route.get("/backups/:id/download", superAdminAuth, BackupController.download)
+route.post("/backups/:id/restore", superAdminAuth, BackupController.restore)
+route.delete("/backups/:id", superAdminAuth, BackupController.remove)
 route.post("/admin", authLimiter, SystemController.createAdmin)
 route.get("/admin/status", SystemController.checkAdminRegistrationStatus)
 route.get("/admins", superAdminAuth, SystemController.getAdmins)
+route.post("/admins", superAdminAuth, SystemController.createAdminAccount)
 route.put("/admin/status", superAdminAuth, SystemController.toggleAdminActive)
+route.put("/admin/access-code", superAdminAuth, SystemController.setAdminAccessCode)
+route.delete("/admin", superAdminAuth, SystemController.removeAdminAccount)
+route.get("/access-code", adminAuth, SystemController.getOwnAccessCodeStatus)
+route.put("/access-code", adminAuth, SystemController.changeOwnAccessCode)
 route.put("/admin/change-credentials", adminAuth, SystemController.changeAdminCredentials)
 route.post("/forgot-password/send-otp", otpLimiter, SystemController.sendForgotPasswordOtp)
 route.post("/forgot-password/verify-otp", otpLimiter, SystemController.verifyForgotPasswordOtp)

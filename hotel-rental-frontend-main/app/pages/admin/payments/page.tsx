@@ -47,10 +47,10 @@ import {
   Globe,
   TrendingUp,
   CreditCard,
-  Printer,
   Download,
   FileSpreadsheet,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -59,11 +59,10 @@ import {
   getExportTimestamp,
 } from "@/app/utils/exportFile";
 import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
-import { printHtmlDocument } from "@/app/utils/printDocument";
+import { downloadReceiptPdf, toSafeFilename } from "@/app/utils/receiptPdf";
 import {
   buildReceiptHtml,
   RECEIPT_STYLES,
-  RECEIPT_PAGE_CSS,
   ReceiptData,
 } from "@/app/utils/receiptTemplate";
 import { RefundPaymentModal } from "./components/refundPaymentModal";
@@ -171,7 +170,7 @@ export default function Page() {
 
   const [selectedPayment, setSelectedPayment] =
     useState<paymentInterface | null>(null);
-  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
 
   const brand = getBrand(systemInfo);
 
@@ -188,6 +187,7 @@ export default function Page() {
       methodLabel: resolvePaymentMethod(payment).label,
       amount: Number(payment.amount || 0),
       balance: Number(payment.balance || 0),
+      status: payment.status === "refunded" ? "refunded" : "paid",
       issuedAt: new Date().toLocaleString("en-PH", {
         year: "numeric",
         month: "short",
@@ -204,31 +204,34 @@ export default function Page() {
     return buildReceiptHtml(buildReceiptData(selectedPayment, brand.logoUrl));
   }, [selectedPayment, buildReceiptData, brand.logoUrl]);
 
-  const handlePrintReceipt = useCallback(async () => {
-    if (!selectedPayment || isPrintingReceipt) return;
+  const handleDownloadReceipt = useCallback(async () => {
+    if (!selectedPayment || isDownloadingReceipt) return;
 
-    setIsPrintingReceipt(true);
+    setIsDownloadingReceipt(true);
     try {
       const inlineLogo = await getLogoDataUrl(brand.logoUrl);
-      const printed = await printHtmlDocument({
-        title: `${brand.hotelName} - Receipt ${
-          selectedPayment.refNumber ||
-          selectedPayment._id.slice(-6).toUpperCase()
-        }`,
-        bodyHtml: buildReceiptHtml(
-          buildReceiptData(selectedPayment, inlineLogo),
-        ),
+      const reference =
+        selectedPayment.refNumber ||
+        `RCP-${selectedPayment._id.slice(-6).toUpperCase()}`;
+      const saved = await downloadReceiptPdf({
+        bodyHtml: buildReceiptHtml(buildReceiptData(selectedPayment, inlineLogo)),
         styles: RECEIPT_STYLES,
-        pageCss: RECEIPT_PAGE_CSS,
+        filename: `${toSafeFilename(`${brand.hotelName}_Receipt_${reference}`)}.pdf`,
+        title: `${brand.hotelName} - Receipt ${reference}`,
       });
-      if (!printed)
-        toast.error("Could not open the print dialog. Please try again.");
+      if (saved) {
+        toast.success("Receipt PDF downloaded.");
+      } else {
+        toast.error("Could not generate the receipt PDF. Please try again.");
+      }
+    } catch {
+      toast.error("Could not generate the receipt PDF. Please try again.");
     } finally {
-      setIsPrintingReceipt(false);
+      setIsDownloadingReceipt(false);
     }
   }, [
     selectedPayment,
-    isPrintingReceipt,
+    isDownloadingReceipt,
     brand.hotelName,
     brand.logoUrl,
     buildReceiptData,
@@ -961,9 +964,9 @@ export default function Page() {
                             size="sm"
                             onClick={() => setSelectedPayment(payment)}
                             className="h-7 px-2 text-[11px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
-                            title="View & Print Official Receipt"
+                            title="View & Download Official Receipt"
                           >
-                            <Printer className="size-3 text-primary" />
+                            <Download className="size-3 text-primary" />
                             <span>Receipt</span>
                           </Button>
                           <RefundPaymentModal payment={payment} />
@@ -1084,7 +1087,7 @@ export default function Page() {
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Review the official receipt for {selectedPayment.paymentBy}{" "}
-                before printing.
+                before downloading.
               </DialogDescription>
             </DialogHeader>
 
@@ -1099,22 +1102,25 @@ export default function Page() {
               </div>
 
               <p className="text-[11px] text-muted-foreground text-center">
-                This is exactly how the receipt will look when printed or saved
-                as PDF.
+                The downloaded PDF uses exactly this receipt layout.
               </p>
 
-              {/* Modal Actions: Print / Close */}
+              {/* Modal Actions: Download / Close */}
               <DialogFooter className="flex-row items-center justify-between sm:justify-between gap-2 pt-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={handlePrintReceipt}
-                  disabled={isPrintingReceipt}
+                  onClick={handleDownloadReceipt}
+                  disabled={isDownloadingReceipt}
                   className="text-xs gap-1.5 cursor-pointer"
                 >
-                  <Printer className="size-3.5 text-primary" />
-                  {isPrintingReceipt ? "Preparing..." : "Print / Save as PDF"}
+                  {isDownloadingReceipt ? (
+                    <Loader2 className="size-3.5 animate-spin text-primary" />
+                  ) : (
+                    <Download className="size-3.5 text-primary" />
+                  )}
+                  {isDownloadingReceipt ? "Generating PDF..." : "Download PDF"}
                 </Button>
 
                 <Button

@@ -1,30 +1,17 @@
 "use client";
 
 import { Check, Circle } from "lucide-react";
+import { PASSWORD_RULES } from "@/app/utils/validation";
 
 interface Props {
   password: string;
 }
 
 export function PasswordRequirements({ password }: Props) {
-  const rules = [
-    {
-      label: "Minimum 8 characters in length",
-      met: password.length >= 8,
-    },
-    {
-      label: "At least 1 uppercase letter (A-Z)",
-      met: /[A-Z]/.test(password),
-    },
-    {
-      label: "At least 1 lowercase letter (a-z)",
-      met: /[a-z]/.test(password),
-    },
-    {
-      label: "At least 1 numerical digit (0-9)",
-      met: /\d/.test(password),
-    },
-  ];
+  const rules = PASSWORD_RULES.map((rule) => ({
+    label: rule.label,
+    met: rule.test(password),
+  }));
 
   return (
     <div className="rounded-lg border border-border/80 bg-muted/40 p-2.5 space-y-1.5 text-xs">

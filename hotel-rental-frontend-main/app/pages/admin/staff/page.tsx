@@ -26,22 +26,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AddStaffModal } from "./components/addStaffModal";
 import { EditStaffModal } from "./components/editStaffModal";
 import { PendingStaffModal } from "./components/pendingStaffModal";
-import { UserPlus, Search, ChevronLeft, ChevronRight, Power, RotateCcw, LogOut, Ban } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Power, RotateCcw, LogOut, Ban, KeyRound } from "lucide-react";
 import useUserStore from "@/app/store/useUserStore";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { AccessCodeDialog } from "@/components/ui/accessCodeDialog";
+import { ReasonDialog } from "@/components/ui/reasonDialog";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All Staff" },
   { value: "active", label: "Active" },
   { value: "pending", label: "Pending Approval" },
   { value: "suspended", label: "Suspended" },
-  { value: "inactive", label: "Inactive" },
+  { value: "inactive", label: "Revoked" },
   { value: "rejected", label: "Rejected" },
 ];
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   active: { label: "Active", cls: "bg-green-600/10 text-green-700 border-green-600/30" },
   suspended: { label: "Suspended", cls: "bg-amber-600/10 text-amber-700 border-amber-600/30" },
-  inactive: { label: "Inactive", cls: "bg-gray-500/10 text-gray-600 border-gray-500/30" },
+  inactive: { label: "Revoked", cls: "bg-gray-500/10 text-gray-600 border-gray-500/30" },
   pending: { label: "Pending", cls: "bg-blue-600/10 text-blue-700 border-blue-600/30" },
   rejected: { label: "Rejected", cls: "bg-red-500/10 text-red-600 border-red-500/30" },
 };
@@ -107,15 +110,16 @@ export default function Page() {
     return data.total || 0;
   }, [data, rows]);
 
+  const invalidateStaff = () => queryClient.invalidateQueries({ queryKey: ["staff"] });
+
   const deleteMutation = useMutation({
-    mutationFn: (id: string) =>
-      axiosInstance.delete("/account", { data: { _id: id } }),
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      axiosInstance.delete("/account", { data: { _id: id, reason } }),
     onSuccess: () => {
-      successAlert("Staff member deactivated.");
-      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      successAlert("Staff access revoked. Active sessions were signed out.");
+      invalidateStaff();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to deactivate staff member."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to revoke staff access.")),
   });
 
   const reactivateMutation = useMutation({
@@ -123,21 +127,19 @@ export default function Page() {
       axiosInstance.put("/account/reactivate", { _id: id }),
     onSuccess: () => {
       successAlert("Staff member reactivated.");
-      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      invalidateStaff();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to reactivate staff member."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to reactivate staff member.")),
   });
 
   const suspendMutation = useMutation({
-    mutationFn: (id: string) =>
-      axiosInstance.put("/account/suspend", { _id: id, reason: "Suspended by admin" }),
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      axiosInstance.put("/account/suspend", { _id: id, reason }),
     onSuccess: () => {
-      successAlert("Staff member suspended. Sessions revoked.");
-      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      successAlert("Staff member suspended. Active sessions were signed out.");
+      invalidateStaff();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to suspend staff member."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to suspend staff member.")),
   });
 
   const unsuspendMutation = useMutation({
@@ -145,10 +147,9 @@ export default function Page() {
       axiosInstance.put("/account/unsuspend", { _id: id }),
     onSuccess: () => {
       successAlert("Staff member unsuspended.");
-      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      invalidateStaff();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to unsuspend staff member."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to unsuspend staff member.")),
   });
 
   const forceLogoutMutation = useMutation({
@@ -156,19 +157,10 @@ export default function Page() {
       axiosInstance.put("/account/force-logout", { _id: id }),
     onSuccess: () => {
       successAlert("All sessions revoked for this staff member.");
-      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      invalidateStaff();
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to revoke sessions."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to revoke sessions.")),
   });
-
-  const mutations = {
-    delete: deleteMutation,
-    reactivate: reactivateMutation,
-    suspend: suspendMutation,
-    unsuspend: unsuspendMutation,
-    forceLogout: forceLogoutMutation,
-  };
 
   return (
     <div className="space-y-6">
@@ -182,7 +174,7 @@ export default function Page() {
             Staff Management
           </h1>
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
-            Manage accounts, permissions, and staff lifecycle (active, suspended, inactive).
+            Manage accounts, permissions, access codes, and staff lifecycle (active, suspended, revoked).
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -226,6 +218,7 @@ export default function Page() {
       ) : isError ? (
         <p className="text-sm text-destructive">Failed to load staff data.</p>
       ) : rows.length > 0 ? (
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -251,9 +244,22 @@ export default function Page() {
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
-                      {badge.label}
-                    </span>
+                    <div className="flex flex-col items-start gap-1">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                      {statusKey === "suspended" && staff.suspensionReason ? (
+                        <span className="max-w-[180px] truncate text-[11px] text-muted-foreground" title={staff.suspensionReason}>
+                          {staff.suspensionReason}
+                        </span>
+                      ) : null}
+                      {statusKey !== "rejected" && !staff.hasAccessCode ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                          <KeyRound className="size-3" />
+                          No access code
+                        </span>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
@@ -279,76 +285,99 @@ export default function Page() {
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 flex-wrap">
                       <EditStaffModal staff={staff} />
-                      {isSuperAdmin && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title={statusKey === "active" ? "Suspend" : "Unsuspend"}
-                          onClick={() =>
-                            statusKey === "active"
-                              ? confirmAlert(
-                                  `Suspend "${staff.name}" and revoke their sessions?`,
-                                  "Suspend",
-                                  () => mutations.suspend.mutate(staff._id),
-                                )
-                              : mutations.unsuspend.mutate(staff._id)
-                          }
-                        >
-                          {statusKey === "active" ? (
-                            <Ban className="size-3.5 text-amber-600" />
-                          ) : (
-                            <RotateCcw className="size-3.5 text-green-600" />
-                          )}
-                        </Button>
+                      {statusKey !== "rejected" && (
+                        <AccessCodeDialog
+                          targetId={staff._id}
+                          targetName={staff.name}
+                          endpoint="/account/access-code"
+                          hasAccessCode={staff.hasAccessCode}
+                          invalidateKey="staff"
+                        />
                       )}
-                      {isSuperAdmin && statusKey === "inactive" && (
+                      {statusKey === "active" && (
+                        <ReasonDialog
+                          trigger={
+                            <Button variant="ghost" size="icon-sm" title="Suspend" aria-label="Suspend">
+                              <Ban className="size-3.5 text-amber-600" />
+                            </Button>
+                          }
+                          title={`Suspend ${staff.name}?`}
+                          description="Suspension temporarily blocks sign-in and immediately ends all active sessions. You can unsuspend the account later."
+                          confirmLabel="Suspend Account"
+                          reasonPlaceholder="e.g. Suspected compromised password"
+                          isPending={suspendMutation.isPending}
+                          onConfirm={(reason) => suspendMutation.mutateAsync({ id: staff._id, reason })}
+                        />
+                      )}
+                      {statusKey === "suspended" && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          title="Reactivate"
+                          title="Unsuspend"
+                          aria-label="Unsuspend"
+                          disabled={unsuspendMutation.isPending}
                           onClick={() =>
                             confirmAlert(
-                              `Reactivate "${staff.name}"?`,
-                              "Reactivate",
-                              () => mutations.reactivate.mutate(staff._id),
+                              `Unsuspend "${staff.name}" and allow them to sign in again?`,
+                              "Unsuspend",
+                              () => unsuspendMutation.mutate(staff._id),
                             )
                           }
                         >
                           <RotateCcw className="size-3.5 text-green-600" />
                         </Button>
                       )}
-                      {isSuperAdmin && (
+                      {statusKey === "inactive" && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title="Reactivate"
+                          aria-label="Reactivate"
+                          disabled={reactivateMutation.isPending}
+                          onClick={() =>
+                            confirmAlert(
+                              `Reactivate "${staff.name}" and restore their access?`,
+                              "Reactivate",
+                              () => reactivateMutation.mutate(staff._id),
+                            )
+                          }
+                        >
+                          <RotateCcw className="size-3.5 text-green-600" />
+                        </Button>
+                      )}
+                      {isSuperAdmin && statusKey === "active" && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           title="Force logout (revoke sessions)"
+                          aria-label="Force logout"
+                          disabled={forceLogoutMutation.isPending}
                           onClick={() =>
                             confirmAlert(
-                              `Revoke all sessions for "${staff.name}"?`,
-                              "Revoke",
-                              () => mutations.forceLogout.mutate(staff._id),
+                              `Sign "${staff.name}" out of all devices?`,
+                              "Sign Out Everywhere",
+                              () => forceLogoutMutation.mutate(staff._id),
                             )
                           }
                         >
                           <LogOut className="size-3.5 text-blue-600" />
                         </Button>
                       )}
-                      {statusKey === "active" ? (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          title="Deactivate"
-                          onClick={() =>
-                            confirmAlert(
-                              `Deactivate staff member "${staff.name}"?`,
-                              "Deactivate",
-                              () => mutations.delete.mutate(staff._id),
-                            )
+                      {(statusKey === "active" || statusKey === "suspended") && (
+                        <ReasonDialog
+                          trigger={
+                            <Button variant="ghost" size="icon-sm" title="Revoke access" aria-label="Revoke access">
+                              <Power className="size-3.5 text-destructive" />
+                            </Button>
                           }
-                        >
-                          <Power className="size-3.5 text-destructive" />
-                        </Button>
-                      ) : null}
+                          title={`Revoke access for ${staff.name}?`}
+                          description="Use this when a staff member leaves or should no longer have access. They are signed out immediately and cannot sign in until reactivated."
+                          confirmLabel="Revoke Access"
+                          reasonPlaceholder="e.g. Employment ended"
+                          isPending={deleteMutation.isPending}
+                          onConfirm={(reason) => deleteMutation.mutateAsync({ id: staff._id, reason })}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -356,6 +385,7 @@ export default function Page() {
             })}
           </TableBody>
         </Table>
+        </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className="text-sm text-muted-foreground">No staff found.</p>

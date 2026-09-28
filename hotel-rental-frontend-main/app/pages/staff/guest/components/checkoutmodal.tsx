@@ -6,6 +6,7 @@ import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { getDaysFromDate, formatTime12hr } from "@/app/utils/customFunction";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,10 +100,10 @@ export function CheckoutModal({ booking }: Props) {
   const nights = Math.max(1, daysStayed);
 
   // Apply discount if room has one
-  const discountedPrice = room.price * (1 - (room.discount || 0) / 100);
+  const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
 
   // Full bill with discount applied (deposit / prior payments tracked separately)
-  const totalBill = Math.max(0, discountedPrice * nights);
+  const totalBill = Math.max(0, Math.round(discountedPrice * nights));
 
   // Amount already paid toward this stay (online reservation deposit, prior partials)
   const alreadyPaid = Math.max(0, booking.paymentAmount || 0);
@@ -127,8 +128,11 @@ export function CheckoutModal({ booking }: Props) {
 
   const isShortPayment = paidNow > 0 && paidNow < balanceDue;
 
+  const isNegativeAmount = paidNow < 0;
+
   const isPaymentValid = useMemo(() => {
-    return paidNow > 0 && paidNow >= balanceDue;
+    if (paidNow < 0) return false;
+    return balanceDue <= 0 || paidNow >= balanceDue;
   }, [paidNow, balanceDue]);
 
   const checkoutMutation = useMutation({
@@ -140,16 +144,23 @@ export function CheckoutModal({ booking }: Props) {
       method: string;
       refNumber?: string;
     }) => axiosInstance.post("/booking/checkout", data),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      const result = response.data || {};
       successAlert("Guest checked out successfully.");
       queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
       queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation-history"] });
+
+      const serverTotal = Number(result.totalAmount);
+      const serverPrevious = Number(result.previouslyPaid);
 
       // Save receipt snapshot for immediate printing
       const snapshot: ReceiptSnapshot = {
         receiptNo:
-          refNumber.trim() || `CHK-${booking._id.slice(-6).toUpperCase()}`,
+          result.refNumber ||
+          refNumber.trim() ||
+          `CHK-${booking._id.slice(-6).toUpperCase()}`,
         checkoutDate: new Date().toLocaleDateString("en-PH", {
           year: "numeric",
           month: "short",
@@ -163,11 +174,13 @@ export function CheckoutModal({ booking }: Props) {
         roomPrice: room.price,
         nights,
         discount: room.discount || 0,
-        downPayment: alreadyPaid,
-        totalBill,
-        balanceDue,
-        amountPaid: paidNow || totalBill,
-        change,
+        downPayment: Number.isFinite(serverPrevious) ? serverPrevious : alreadyPaid,
+        totalBill: Number.isFinite(serverTotal) ? serverTotal : totalBill,
+        balanceDue: Number.isFinite(serverTotal) && Number.isFinite(serverPrevious)
+          ? Math.max(0, serverTotal - serverPrevious)
+          : balanceDue,
+        amountPaid: Number(result.amountTendered ?? paidNow) || 0,
+        change: Number(result.change ?? change) || 0,
         method: paymentMethod,
         refNumber: refNumber.trim() || undefined,
         cashierName: user?.name || "Front Desk Staff",
@@ -176,10 +189,14 @@ export function CheckoutModal({ booking }: Props) {
       setReceiptData(snapshot);
       setStep("completed");
     },
-    onError: (err: { response?: { data?: { message?: string } } }) => {
-      const message =
-        err.response?.data?.message || "Failed to checkout guest.";
-      errorAlert(message);
+    onError: (err) => {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      errorAlert(getApiErrorMessage(err, "Failed to checkout guest."));
+      if (status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
+        setOpen(false);
+        resetForm();
+      }
     },
   });
 
@@ -203,6 +220,7 @@ export function CheckoutModal({ booking }: Props) {
   };
 
   const handleConfirmCheckout = () => {
+    if (checkoutMutation.isPending) return;
     checkoutMutation.mutate({
       bookingId: booking._id,
       roomId: room._id,
@@ -523,9 +541,20 @@ export function CheckoutModal({ booking }: Props) {
                           className="pl-7 text-xs font-mono h-9.5"
                           value={paymentAmount}
                           onChange={(e) => setPaymentAmount(e.target.value)}
-                          required
+                          required={balanceDue > 0}
+                          aria-invalid={isShortPayment || isNegativeAmount}
                         />
                       </div>
+                      {balanceDue <= 0 && (
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                          The balance is already fully paid. No additional payment is needed.
+                        </p>
+                      )}
+                      {isNegativeAmount && (
+                        <p className="text-[11px] text-destructive font-medium">
+                          Amount cannot be negative.
+                        </p>
+                      )}
                       {isShortPayment && (
                         <p className="text-[11px] text-destructive font-medium">
                           Insufficient amount. Balance due is{" "}
@@ -569,7 +598,7 @@ export function CheckoutModal({ booking }: Props) {
                     <Button
                       type="submit"
                       size="sm"
-                      disabled={!paymentAmount || !isPaymentValid}
+                      disabled={(balanceDue > 0 && !paymentAmount) || !isPaymentValid}
                       className="text-xs font-semibold gap-1.5"
                     >
                       <Wallet className="size-3.5" />

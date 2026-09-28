@@ -7,6 +7,7 @@ import helmet from "helmet"
 import dotenv from 'dotenv';
 import 'dotenv/config';
 import systemModel from './model/system.model';
+import { BackupService } from './services/backup.service';
 
 
 dotenv.config();
@@ -67,6 +68,14 @@ mongoose.connect(mongodb_uri)
   .then(async () => {
     console.log("Connected to MongoDB");
     await runSchemaMigrations();
+    try {
+      const recovered = await BackupService.recoverInterrupted();
+      if (recovered > 0) {
+        console.log(`Marked ${recovered} interrupted backup(s) as failed`);
+      }
+    } catch (error) {
+      console.log("Backup recovery error: " + (error as Error).message);
+    }
   })
   .catch((error) => {
     console.log("MongoDB connection failed: " + (error as Error).message);

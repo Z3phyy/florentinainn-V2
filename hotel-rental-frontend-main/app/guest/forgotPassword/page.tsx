@@ -4,48 +4,69 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useForm, useWatch } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { errorAlert, successAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { emailSchema, passwordWithConfirmSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/formField";
+import { PasswordInput } from "@/components/ui/passwordInput";
 import { Loader2, Mail, ShieldCheck, KeyRound } from "lucide-react";
-import { validatePassword, validateEmail } from "@/app/utils/validation";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
 
-type ErrorResponse = { response?: { data?: string } };
-
-const errorMessage = (err: ErrorResponse, fallback: string) =>
-  typeof err.response?.data === "string" ? err.response.data : fallback;
+const emailStepSchema = z.object({ email: emailSchema });
+const otpStepSchema = z.object({
+  otp: z.string().trim().regex(/^\d{4}$/, "Enter the 4-digit code from your email."),
+});
 
 export default function Page() {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const emailForm = useForm<z.input<typeof emailStepSchema>>({
+    resolver: zodResolver(emailStepSchema),
+    mode: "onTouched",
+    defaultValues: { email: "" },
+  });
+  const otpForm = useForm<z.input<typeof otpStepSchema>>({
+    resolver: zodResolver(otpStepSchema),
+    mode: "onTouched",
+    defaultValues: { otp: "" },
+  });
+  const passwordForm = useForm<z.input<typeof passwordWithConfirmSchema>>({
+    resolver: zodResolver(passwordWithConfirmSchema),
+    mode: "onTouched",
+    defaultValues: { password: "", confirmPassword: "" },
+  });
 
   const sendOtpMutation = useMutation({
     mutationFn: (data: { email: string }) =>
       axiosInstance.post("/system/forgot-password/send-otp", data),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       successAlert("OTP sent to your email");
+      setEmail(variables.email);
       setStep(2);
     },
-    onError: (err: ErrorResponse) =>
-      errorAlert(errorMessage(err, "Failed to send OTP. Please try again.")),
+    onError: (err) =>
+      errorAlert(getApiErrorMessage(err, "Failed to send OTP. Please try again.")),
   });
 
   const verifyOtpMutation = useMutation({
     mutationFn: (data: { email: string; inputOtp: string }) =>
       axiosInstance.post("/system/forgot-password/verify-otp", data),
-    onSuccess: () => {
+    onSuccess: (_res, variables) => {
       successAlert("OTP verified");
+      setOtp(variables.inputOtp);
       setStep(3);
     },
-    onError: (err: ErrorResponse) =>
-      errorAlert(errorMessage(err, "Invalid OTP. Please try again.")),
+    onError: (err) =>
+      errorAlert(getApiErrorMessage(err, "Invalid OTP. Please try again.")),
   });
 
   const resetPasswordMutation = useMutation({
@@ -55,59 +76,26 @@ export default function Page() {
       successAlert("Password updated successfully");
       router.push("/guest/login");
     },
-    onError: (err: ErrorResponse) =>
-      errorAlert(errorMessage(err, "Failed to reset password. Please try again.")),
+    onError: (err) =>
+      errorAlert(getApiErrorMessage(err, "Failed to reset password. Please try again.")),
   });
 
-  const handleSendOtp = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendOtp = emailForm.handleSubmit((values) => {
+    sendOtpMutation.mutate({ email: values.email.trim() });
+  });
 
-    if (!email) {
-      errorAlert("Please enter your email.");
-      return;
-    }
+  const handleVerifyOtp = otpForm.handleSubmit((values) => {
+    verifyOtpMutation.mutate({ email, inputOtp: values.otp.trim() });
+  });
 
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      errorAlert(emailErr);
-      return;
-    }
+  const handleResetPassword = passwordForm.handleSubmit((values) => {
+    resetPasswordMutation.mutate({ email, newPassword: values.password, inputOtp: otp });
+  });
 
-    sendOtpMutation.mutate({ email });
-  };
-
-  const handleVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!otp) {
-      errorAlert("Please enter the OTP.");
-      return;
-    }
-
-    verifyOtpMutation.mutate({ email, inputOtp: otp });
-  };
-
-  const handleResetPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!newPassword || !confirmPassword) {
-      errorAlert("Please fill in all fields.");
-      return;
-    }
-
-    const passErr = validatePassword(newPassword);
-    if (passErr) {
-      errorAlert(passErr);
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      errorAlert("Passwords do not match.");
-      return;
-    }
-
-    resetPasswordMutation.mutate({ email, newPassword, inputOtp: otp });
-  };
+  const newPassword = useWatch({ control: passwordForm.control, name: "password" }) || "";
+  const emailErrors = emailForm.formState.errors;
+  const otpErrors = otpForm.formState.errors;
+  const passwordErrors = passwordForm.formState.errors;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -153,18 +141,17 @@ export default function Page() {
           </div>
 
           {step === 1 && (
-            <form onSubmit={handleSendOtp} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+            <form onSubmit={handleSendOtp} className="space-y-4" noValidate>
+              <FormField id="email" label="Email" required error={emailErrors.email?.message}>
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="admin@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
+                  aria-invalid={!!emailErrors.email}
+                  {...emailForm.register("email")}
                 />
-              </div>
+              </FormField>
 
               <Button
                 type="submit"
@@ -184,20 +171,26 @@ export default function Page() {
           )}
 
           {step === 2 && (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="otp">Verification Code</Label>
+            <form onSubmit={handleVerifyOtp} className="space-y-4" noValidate>
+              <FormField id="otp" label="Verification Code" required error={otpErrors.otp?.message}>
                 <Input
                   id="otp"
                   type="text"
                   inputMode="numeric"
+                  autoComplete="one-time-code"
                   maxLength={4}
                   placeholder="0000"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                  required
+                  aria-invalid={!!otpErrors.otp}
+                  {...otpForm.register("otp", {
+                    onChange: (e) => {
+                      const digits = String(e.target.value).replace(/\D/g, "");
+                      if (digits !== e.target.value) {
+                        otpForm.setValue("otp", digits, { shouldValidate: otpForm.getFieldState("otp").isTouched });
+                      }
+                    },
+                  })}
                 />
-              </div>
+              </FormField>
 
               <Button
                 type="submit"
@@ -217,32 +210,33 @@ export default function Page() {
           )}
 
           {step === 3 && (
-            <form onSubmit={handleResetPassword} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="newPassword">New Password</Label>
-                <Input
+            <form onSubmit={handleResetPassword} className="space-y-4" noValidate>
+              <FormField id="newPassword" label="New Password" required error={passwordErrors.password?.message}>
+                <PasswordInput
                   id="newPassword"
-                  type="password"
+                  autoComplete="new-password"
                   placeholder="••••••••"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
+                  aria-invalid={!!passwordErrors.password}
+                  {...passwordForm.register("password", {
+                    onChange: () => {
+                      if (passwordForm.getFieldState("password").isTouched) passwordForm.trigger("password");
+                      if (passwordForm.getFieldState("confirmPassword").isTouched) passwordForm.trigger("confirmPassword");
+                    },
+                  })}
                 />
-              </div>
+              </FormField>
 
               {newPassword && <PasswordRequirements password={newPassword} />}
 
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm New Password</Label>
-                <Input
+              <FormField id="confirmPassword" label="Confirm New Password" required error={passwordErrors.confirmPassword?.message}>
+                <PasswordInput
                   id="confirmPassword"
-                  type="password"
+                  autoComplete="new-password"
                   placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
+                  aria-invalid={!!passwordErrors.confirmPassword}
+                  {...passwordForm.register("confirmPassword")}
                 />
-              </div>
+              </FormField>
 
               <Button
                 type="submit"

@@ -22,7 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
   guests: "Guests",
 };
 
-export function BookingHistoryDialog({ booking }: { booking: bookingInterface }) {
+export function BookingHistoryDialog({ booking }: { booking: Pick<bookingInterface, "modificationHistory"> }) {
   const [open, setOpen] = useState(false);
   const history = booking.modificationHistory || [];
 

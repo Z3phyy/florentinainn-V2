@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Controller, useForm, useWatch } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { errorAlert, successAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { adminRegistrationSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/formField";
+import { PasswordInput } from "@/components/ui/passwordInput";
 import {
   Select,
   SelectContent,
@@ -16,20 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, ShieldAlert, Eye, EyeOff } from "lucide-react";
-import { validatePassword, validateEmail } from "@/app/utils/validation";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { checkEmailAvailability } from "@/app/utils/customFunction";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
-import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
+
+type Values = z.input<typeof adminRegistrationSchema>;
 
 export default function Page() {
   const router = useRouter();
-  const { showPassword, togglePasswordVisibility, passwordInputType } =
-    usePasswordVisibility();
-  const [type, setType] = useState("admin");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
 
   const { data: adminStatus, isLoading: statusLoading } = useQuery<{
     canRegister: boolean;
@@ -43,72 +43,65 @@ export default function Page() {
     },
   });
 
+  const {
+    register,
+    control,
+    handleSubmit,
+    setValue,
+    setError,
+    trigger,
+    getFieldState,
+    formState: { errors, isSubmitting },
+  } = useForm<Values>({
+    resolver: zodResolver(adminRegistrationSchema),
+    mode: "onTouched",
+    defaultValues: { type: "super admin", email: "", password: "", confirmPassword: "" },
+  });
+
   useEffect(() => {
     if (adminStatus) {
-      if (adminStatus.hasAdmin && !adminStatus.hasSuperAdmin) {
-        setType("super admin");
-      } else if (!adminStatus.hasAdmin && adminStatus.hasSuperAdmin) {
-        setType("admin");
-      }
+      setValue("type", adminStatus.hasSuperAdmin ? "admin" : "super admin");
     }
-  }, [adminStatus]);
+  }, [adminStatus, setValue]);
 
   const registerMutation = useMutation({
     mutationFn: (data: { email: string; password: string; type: string }) =>
       axiosInstance.post("/system/admin", data),
     onSuccess: () => {
-      successAlert("Admin account created successfully");
+      successAlert("Admin account created. Sign in to set up your access code.");
       router.push("/guest/login");
     },
-    onError: (err: { response?: { data?: string } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to create admin account. Please try again.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to create admin account. Please try again."));
     },
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const onSubmit = handleSubmit(async (values) => {
     if (adminStatus?.canRegister === false) {
-      errorAlert("Both Admin and Super Admin accounts are already registered.");
+      errorAlert("Public admin registration is closed.");
       return;
     }
-
-    if (!type || !email || !password || !confirmPassword) {
-      errorAlert("Please fill in all fields.");
+    try {
+      const availability = await checkEmailAvailability(values.email);
+      if (!availability.available) {
+        setError("email", {
+          message: "This email is already registered. Please use a different email address.",
+        });
+        return;
+      }
+    } catch (err) {
+      errorAlert(getApiErrorMessage(err, "Could not verify the email address. Please try again."));
       return;
     }
+    registerMutation.mutate({
+      email: values.email.trim(),
+      password: values.password,
+      type: values.type,
+    });
+  });
 
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      errorAlert(emailErr);
-      return;
-    }
-
-    const passErr = validatePassword(password);
-    if (passErr) {
-      errorAlert(passErr);
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      errorAlert("Passwords do not match.");
-      return;
-    }
-
-    const availability = await checkEmailAvailability(email);
-    if (!availability.available) {
-      errorAlert(
-        "Email already exists. Registration is blocked — please use a different email address.",
-      );
-      return;
-    }
-
-    registerMutation.mutate({ email, password, type });
-  };
+  const password = useWatch({ control, name: "password" }) || "";
+  const busy = isSubmitting || registerMutation.isPending;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -119,8 +112,8 @@ export default function Page() {
               Create Admin Account
             </h1>
             <p className="text-sm text-muted-foreground">
-              Register an administrator account. Only one admin and one super
-              admin account are allowed.
+              Initial setup only. Once the super admin exists, administrator
+              accounts are created from System Configuration.
             </p>
           </div>
 
@@ -135,7 +128,8 @@ export default function Page() {
                 Registration Closed
               </p>
               <p className="text-xs text-muted-foreground">
-                Both the Admin and Super Admin accounts are already registered.
+                The super admin account is already registered. Ask the super
+                admin to create administrator accounts from System Configuration.
               </p>
               <Button
                 onClick={() => router.push("/guest/login")}
@@ -147,108 +141,69 @@ export default function Page() {
               </Button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="type">Account Type</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select account type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {!adminStatus?.hasAdmin && (
-                      <SelectItem value="admin">Admin</SelectItem>
-                    )}
-                    {!adminStatus?.hasSuperAdmin && (
-                      <SelectItem value="super admin">Super Admin</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+            <form onSubmit={onSubmit} className="space-y-4" noValidate>
+              <FormField id="type" label="Account Type" required error={errors.type?.message}>
+                <Controller
+                  control={control}
+                  name="type"
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger id="type" className="w-full">
+                        <SelectValue placeholder="Select account type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {!adminStatus?.hasSuperAdmin && (
+                          <SelectItem value="super admin">Super Admin</SelectItem>
+                        )}
+                        {!adminStatus?.hasAdmin && (
+                          <SelectItem value="admin">Admin</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </FormField>
 
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+              <FormField id="email" label="Email" required error={errors.email?.message}>
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="admin@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
+                  aria-invalid={!!errors.email}
+                  {...register("email")}
                 />
-              </div>
+              </FormField>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={passwordInputType}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="pr-10"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={togglePasswordVisibility}
-                    aria-label={
-                      showPassword ? "Hide password" : "Show password"
-                    }
-                    aria-pressed={showPassword}
-                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <FormField id="password" label="Password" required error={errors.password?.message}>
+                <PasswordInput
+                  id="password"
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                  aria-invalid={!!errors.password}
+                  {...register("password", {
+                    onChange: () => {
+                      if (getFieldState("password").isTouched) trigger("password");
+                      if (getFieldState("confirmPassword").isTouched) trigger("confirmPassword");
+                    },
+                  })}
+                />
+              </FormField>
 
               {password && <PasswordRequirements password={password} />}
 
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <FormField id="confirmPassword" label="Confirm Password" required error={errors.confirmPassword?.message}>
+                <PasswordInput
+                  id="confirmPassword"
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                  aria-invalid={!!errors.confirmPassword}
+                  {...register("confirmPassword")}
+                />
+              </FormField>
 
-                <div className="relative">
-                  <Input
-                    id="confirmPassword"
-                    type={passwordInputType}
-                    placeholder="••••••••"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                    className="pr-10"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={togglePasswordVisibility}
-                    aria-label={
-                      showPassword ? "Hide password" : "Show password"
-                    }
-                    aria-pressed={showPassword}
-                    className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={registerMutation.isPending}
-              >
-                {registerMutation.isPending ? (
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
                     Creating account...

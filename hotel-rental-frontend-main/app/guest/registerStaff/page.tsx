@@ -1,91 +1,76 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useForm, useWatch } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { errorAlert, successAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { staffRegistrationSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Loader2, Eye, EyeOff } from "lucide-react";
-import { validatePassword, validateEmail } from "@/app/utils/validation";
+import { FormField } from "@/components/ui/formField";
+import { PasswordInput } from "@/components/ui/passwordInput";
+import { Loader2 } from "lucide-react";
 import { checkEmailAvailability } from "@/app/utils/customFunction";
 import { PasswordRequirements } from "@/components/ui/passwordRequirements";
-import { usePasswordVisibility } from "@/app/hooks/usePasswordVisibility";
+
+type Values = z.input<typeof staffRegistrationSchema>;
 
 export default function Page() {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const { showPassword, togglePasswordVisibility, passwordInputType } =
-    usePasswordVisibility();
+  const {
+    register,
+    control,
+    handleSubmit,
+    setError,
+    trigger,
+    getFieldState,
+    formState: { errors, isSubmitting },
+  } = useForm<Values>({
+    resolver: zodResolver(staffRegistrationSchema),
+    mode: "onTouched",
+    defaultValues: { name: "", email: "", password: "", confirmPassword: "" },
+  });
 
   const registerMutation = useMutation({
-    mutationFn: (data: {
-      name: string;
-      email: string;
-      password: string;
-      permisions: string[];
-      isApproved: boolean;
-    }) => axiosInstance.post("/account", data),
+    mutationFn: (data: { name: string; email: string; password: string }) =>
+      axiosInstance.post("/account", data),
     onSuccess: () => {
       successAlert("Registration submitted. Awaiting admin approval.");
       router.push("/guest/login");
     },
-    onError: (err: { response?: { data?: string } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to register. Please try again.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to register. Please try again."));
     },
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!name || !email || !password || !confirmPassword) {
-      errorAlert("Please fill in all fields.");
-      return;
-    }
-
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      errorAlert(emailErr);
-      return;
-    }
-
-    const passErr = validatePassword(password);
-    if (passErr) {
-      errorAlert(passErr);
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      errorAlert("Passwords do not match.");
-      return;
-    }
-
-    const availability = await checkEmailAvailability(email);
-    if (!availability.available) {
-      errorAlert(
-        "Email already exists. Registration is blocked — please use a different email address.",
-      );
+  const onSubmit = handleSubmit(async (values) => {
+    try {
+      const availability = await checkEmailAvailability(values.email);
+      if (!availability.available) {
+        setError("email", {
+          message: "This email is already registered. Please use a different email address.",
+        });
+        return;
+      }
+    } catch (err) {
+      errorAlert(getApiErrorMessage(err, "Could not verify the email address. Please try again."));
       return;
     }
 
     registerMutation.mutate({
-      name,
-      email,
-      password,
-      permisions: [],
-      isApproved: false,
+      name: values.name.trim(),
+      email: values.email.trim(),
+      password: values.password,
     });
-  };
+  });
+
+  const password = useWatch({ control, name: "password" }) || "";
+  const busy = isSubmitting || registerMutation.isPending;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -96,103 +81,62 @@ export default function Page() {
               Staff Registration
             </h1>
             <p className="text-sm text-muted-foreground">
-              Register a staff account. An admin must approve your account
-              before you can sign in.
+              Register a staff account. An admin must approve your account and
+              assign your access code before you can sign in.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
+          <form onSubmit={onSubmit} className="space-y-4" noValidate>
+            <FormField id="name" label="Name" required error={errors.name?.message}>
               <Input
                 id="name"
                 placeholder="John Doe"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
+                autoComplete="name"
+                aria-invalid={!!errors.name}
+                {...register("name")}
               />
-            </div>
+            </FormField>
 
-            <div className="space-y-2">
-              <Label htmlFor="username">Email</Label>
+            <FormField id="username" label="Email" required error={errors.email?.message}>
               <Input
                 id="username"
                 type="email"
+                autoComplete="email"
                 placeholder="staff@hotel.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
+                aria-invalid={!!errors.email}
+                {...register("email")}
               />
-            </div>
+            </FormField>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={passwordInputType}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="pr-10"
-                />
-
-                <button
-                  type="button"
-                  onClick={togglePasswordVisibility}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  aria-pressed={showPassword}
-                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {showPassword ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                </button>
-              </div>
-            </div>
+            <FormField id="password" label="Password" required error={errors.password?.message}>
+              <PasswordInput
+                id="password"
+                autoComplete="new-password"
+                placeholder="••••••••"
+                aria-invalid={!!errors.password}
+                {...register("password", {
+                  onChange: () => {
+                    if (getFieldState("password").isTouched) trigger("password");
+                    if (getFieldState("confirmPassword").isTouched) trigger("confirmPassword");
+                  },
+                })}
+              />
+            </FormField>
 
             {password && <PasswordRequirements password={password} />}
 
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+            <FormField id="confirmPassword" label="Confirm Password" required error={errors.confirmPassword?.message}>
+              <PasswordInput
+                id="confirmPassword"
+                autoComplete="new-password"
+                placeholder="••••••••"
+                aria-invalid={!!errors.confirmPassword}
+                {...register("confirmPassword")}
+              />
+            </FormField>
 
-              <div className="relative">
-                <Input
-                  id="confirmPassword"
-                  type={passwordInputType}
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  className="pr-10"
-                />
-
-                <button
-                  type="button"
-                  onClick={togglePasswordVisibility}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  aria-pressed={showPassword}
-                  className="absolute right-0 top-0 flex h-full w-10 items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {showPassword ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={registerMutation.isPending}
-            >
-              {registerMutation.isPending ? (
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
                   Registering...

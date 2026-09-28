@@ -1,6 +1,7 @@
 import BookingsModel from "../model/bookings.model";
 import { bookingInterfaceInput, bookingModification, isWalkInType } from "../types/bookings.type";
 import { RoomService } from "./room.service";
+import RoomModel from "../model/room.model";
 
 export class BookingService {
   static async getAll(options: { status?: string; search?: string } = {}) {
@@ -312,8 +313,15 @@ export class BookingService {
     },
   ) {
     const query: any = {};
-    if (match.clientEmail) query.clientEmail = match.clientEmail;
-    else if (match.clientPhone) query.clientPhone = match.clientPhone;
+    if (match.clientEmail) {
+      query.clientEmail = {
+        $regex: `^${match.clientEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      };
+    } else if (match.clientPhone) query.clientPhone = match.clientPhone;
+    else if (match.clientName) query.clientName = match.clientName;
+
+    if (Object.keys(query).length === 0) return { modifiedCount: 0 };
 
     const update: any = {};
     if (data.clientName !== undefined) update.clientName = data.clientName;
@@ -326,5 +334,238 @@ export class BookingService {
 
     const result = await BookingsModel.updateMany(query, { $set: update });
     return result;
+  }
+
+  static async getHistory(options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    paymentStatus?: string;
+    type?: string;
+    from?: string;
+    to?: string;
+    sortDir?: "asc" | "desc";
+  }) {
+    const page = Math.max(1, Math.floor(Number(options.page) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(options.limit) || 10)));
+
+    const match: Record<string, unknown> = {};
+    if (options.status && options.status !== "all") {
+      match.status = options.status;
+    }
+    if (options.type && options.type !== "all") {
+      match.type =
+        options.type === "walk in" ? { $in: ["walk in", "walk-in"] } : options.type;
+    }
+    const dateRange: Record<string, string> = {};
+    if (options.from) dateRange.$gte = options.from;
+    if (options.to) dateRange.$lte = options.to;
+    if (Object.keys(dateRange).length > 0) {
+      match.arrivalDate = dateRange;
+    }
+
+    const pipeline: any[] = [
+      { $match: match },
+      {
+        $lookup: {
+          from: RoomModel.collection.name,
+          localField: "room",
+          foreignField: "_id",
+          as: "roomDoc",
+        },
+      },
+      { $unwind: { path: "$roomDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          bookingId: { $toString: "$_id" },
+          createdAt: { $toDate: "$_id" },
+          nights: {
+            $max: [
+              1,
+              {
+                $let: {
+                  vars: {
+                    arrival: {
+                      $dateFromString: { dateString: "$arrivalDate", format: "%Y-%m-%d", onError: null, onNull: null },
+                    },
+                    departure: {
+                      $dateFromString: { dateString: "$departureDate", format: "%Y-%m-%d", onError: null, onNull: null },
+                    },
+                  },
+                  in: {
+                    $cond: [
+                      { $and: ["$$arrival", "$$departure"] },
+                      { $dateDiff: { startDate: "$$arrival", endDate: "$$departure", unit: "day" } },
+                      1,
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          amountPaid: { $ifNull: ["$paymentAmount", 0] },
+          billTotal: {
+            $cond: [
+              { $gt: [{ $ifNull: ["$totalAmount", 0] }, 0] },
+              "$totalAmount",
+              {
+                $round: [
+                  {
+                    $multiply: [
+                      {
+                        $round: [
+                          {
+                            $multiply: [
+                              { $ifNull: ["$roomDoc.price", 0] },
+                              {
+                                $subtract: [
+                                  1,
+                                  { $divide: [{ $ifNull: ["$roomDoc.discount", 0] }, 100] },
+                                ],
+                              },
+                            ],
+                          },
+                          0,
+                        ],
+                      },
+                      "$nights",
+                    ],
+                  },
+                  0,
+                ],
+              },
+            ],
+          },
+          updatedAt: {
+            $max: [
+              { $toDate: "$_id" },
+              { $ifNull: ["$checkedOutAt", null] },
+              { $ifNull: ["$canceledAt", null] },
+              { $ifNull: ["$noShowAt", null] },
+              { $max: "$modificationHistory.changedAt" },
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          balance: { $max: [0, { $subtract: ["$billTotal", "$amountPaid"] }] },
+          paymentStatus: {
+            $switch: {
+              branches: [
+                { case: { $lte: ["$amountPaid", 0] }, then: "unpaid" },
+                { case: { $gte: ["$amountPaid", "$billTotal"] }, then: "paid" },
+              ],
+              default: "partial",
+            },
+          },
+        },
+      },
+    ];
+
+    const search = (options.search || "").trim();
+    if (search) {
+      const re = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+      pipeline.push({
+        $match: {
+          $or: [
+            { clientName: re },
+            { clientEmail: re },
+            { clientPhone: re },
+            { paymentRefNumber: re },
+            { bookingId: re },
+            { "roomDoc.roomNumber": re },
+            { "roomDoc.category": re },
+          ],
+        },
+      });
+    }
+
+    if (options.paymentStatus && options.paymentStatus !== "all") {
+      pipeline.push({ $match: { paymentStatus: options.paymentStatus } });
+    }
+
+    const sortDirection = options.sortDir === "asc" ? 1 : -1;
+    pipeline.push(
+      { $sort: { createdAt: sortDirection, _id: sortDirection } },
+      {
+        $facet: {
+          items: [
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 0,
+                bookingId: 1,
+                reference: { $toUpper: { $substrCP: ["$bookingId", 16, 8] } },
+                clientName: 1,
+                clientEmail: 1,
+                clientPhone: 1,
+                guests: 1,
+                type: 1,
+                status: 1,
+                arrivalDate: 1,
+                arrivalTime: 1,
+                departureDate: 1,
+                nights: 1,
+                checkedOutAt: 1,
+                earlyCheckout: 1,
+                canceledAt: 1,
+                cancellationReason: 1,
+                noShowAt: 1,
+                paymentMethod: 1,
+                paymentRefNumber: 1,
+                amountPaid: 1,
+                billTotal: 1,
+                balance: 1,
+                paymentStatus: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                room: {
+                  _id: "$roomDoc._id",
+                  roomNumber: "$roomDoc.roomNumber",
+                  category: "$roomDoc.category",
+                },
+                handledBy: {
+                  $setDifference: [
+                    {
+                      $setUnion: [
+                        { $ifNull: ["$modificationHistory.changedBy", []] },
+                        [{ $ifNull: ["$canceledBy", ""] }, { $ifNull: ["$noShowBy", ""] }],
+                      ],
+                    },
+                    ["", null],
+                  ],
+                },
+                modificationHistory: 1,
+              },
+            },
+          ],
+          total: [{ $count: "count" }],
+          statusCounts: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+        },
+      },
+    );
+
+    const [result] = await BookingsModel.aggregate(pipeline);
+    const total = result?.total?.[0]?.count || 0;
+    const statusCounts: Record<string, number> = {};
+    for (const entry of result?.statusCounts || []) {
+      statusCounts[entry._id] = entry.count;
+    }
+
+    return {
+      items: result?.items || [],
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      statusCounts,
+    };
   }
 }

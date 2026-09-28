@@ -39,7 +39,7 @@ export function PendingStaffModal() {
   const approveMutation = useMutation({
     mutationFn: (_id: string) => axiosInstance.put("/account/approve", { _id }),
     onSuccess: () => {
-      successAlert("Staff account approved.");
+      successAlert("Staff account approved. Assign an access code (key icon) so they can sign in.");
       queryClient.invalidateQueries({ queryKey: ["staff"] });
       setOpen(false);
     },
