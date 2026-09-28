@@ -29,3 +29,19 @@ export const IP_POLICY: LoginPolicy = {
   lockoutMs: IP_LOCKOUT_MS,
   windowMs: IP_ATTEMPT_WINDOW_MS,
 };
+
+export const ACCESS_CODE_MAX_FAILED_ATTEMPTS = 5;
+export const ACCESS_CODE_LOCKOUT_MINUTES = 15;
+export const ACCESS_CODE_CHALLENGE_TTL_SECONDS = 10 * 60;
+
+export const ACCESS_CODE_POLICY: LoginPolicy = {
+  maxAttempts: ACCESS_CODE_MAX_FAILED_ATTEMPTS,
+  lockoutMs: ACCESS_CODE_LOCKOUT_MINUTES * 60 * 1000,
+  windowMs: ATTEMPT_WINDOW_MS,
+};
+
+export const ACCESS_CODE_IP_POLICY: LoginPolicy = {
+  maxAttempts: IP_MAX_FAILED_ATTEMPTS,
+  lockoutMs: IP_LOCKOUT_MS,
+  windowMs: IP_ATTEMPT_WINDOW_MS,
+};

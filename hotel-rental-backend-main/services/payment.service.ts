@@ -67,7 +67,7 @@ export class Paymentservice {
     refundReason: string;
     refundRef?: string;
   }) {
-    const payment = await paymentModel.findByIdAndUpdate(id, {
+    const payment = await paymentModel.findOneAndUpdate({ _id: id, status: { $ne: "refunded" } }, {
       status: "refunded",
       refundedAt: new Date(),
       refundedBy: data.refundedBy,

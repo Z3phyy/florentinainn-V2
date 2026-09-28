@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,8 +35,7 @@ export function ExtendStayModal({ booking }: { booking: bookingInterface }) {
       queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
       setOpen(false);
     },
-    onError: (err: { response?: { data?: { message?: string } } }) =>
-      errorAlert(err.response?.data?.message || "Failed to extend stay."),
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to extend stay.")),
   });
 
   const handleSubmit = (e: React.FormEvent) => {

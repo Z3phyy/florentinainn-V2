@@ -1,15 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthRequest } from "../types/request.type";
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import { AccountService } from "../services/acccount.service";
 import { AdminService } from "../services/admin.service";
-import { accountInterface } from "../types/accounts.type";
-import { getJwtSecretCandidates } from "../config/jwt";
+import { verifyAnyToken, SessionTokenPayload } from "../utils/authToken";
 
 dotenv.config();
-
-const jwtSecrets = getJwtSecretCandidates();
 
 const buildStaffAccount = (
   accountDoc: any,
@@ -34,7 +30,7 @@ const buildStaffAccount = (
 });
 
 // A staff/account document that is blocked from accessing the system.
-const isStaffBlocked = (doc: any) => {
+export const isStaffBlocked = (doc: any) => {
   if (doc.isApproved === false) {
     return { blocked: true, message: "Account is pending approval" };
   }
@@ -52,6 +48,21 @@ const isStaffBlocked = (doc: any) => {
   return { blocked: false };
 };
 
+export const isAdminBlocked = (doc: any) => {
+  if (doc.isActive === false) {
+    return { blocked: true, message: "Admin account is deactivated" };
+  }
+  if (doc.isSuspended === true) {
+    return {
+      blocked: true,
+      message: doc.suspensionReason
+        ? `Admin account is suspended: ${doc.suspensionReason}`
+        : "Admin account is suspended",
+    };
+  }
+  return { blocked: false };
+};
+
 export const authenticateJWT = async (
   request: AuthRequest,
   response: Response,
@@ -60,7 +71,6 @@ export const authenticateJWT = async (
   const authHeader = request.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.log("No token provided");
     response.status(401).json({ message: "No token provided" });
     return;
   }
@@ -68,62 +78,58 @@ export const authenticateJWT = async (
   const token = authHeader.split(" ")[1];
 
   try {
-    let decoded:
-      | { id: string; role?: string; name?: string; sv?: number }
-      | undefined;
-    for (const candidate of jwtSecrets) {
-      try {
-        decoded = jwt.verify(token, candidate) as {
-          id: string;
-          role?: string;
-          name?: string;
-          sv?: number;
-        };
-        break;
-      } catch {
-        // try next candidate
-      }
-    }
-    if (!decoded) {
-      console.log(
-        "JWT Auth error: none of the known secrets matched the token signature",
-      );
+    const decoded = verifyAnyToken<SessionTokenPayload>(token);
+    if (!decoded || typeof decoded.id !== "string") {
       response.status(401).json({ message: "Invalid token" });
       return;
     }
-    const { id, role, name } = decoded;
 
-    // 1. Check in Staff/Employee Accounts
+    if (decoded.purpose || decoded.acv !== true) {
+      response.status(401).json({
+        message: "Access code verification required. Please log in again.",
+        code: "ACCESS_CODE_REQUIRED",
+      });
+      return;
+    }
+
+    const { id, name } = decoded;
+    const tokenVersion = typeof decoded.sv === "number" ? decoded.sv : -1;
+
     const accountDoc = await AccountService.get(id);
     if (accountDoc) {
       const status = isStaffBlocked(accountDoc);
       if (status.blocked) {
-        response.status(403).json({ message: status.message });
+        response
+          .status(403)
+          .json({ message: status.message, code: "ACCOUNT_DISABLED" });
         return;
       }
-      const sessionVersion = accountDoc.sessionVersion || 0;
-      if (decoded.sv !== undefined && decoded.sv !== sessionVersion) {
-        response
-          .status(401)
-          .json({ message: "Session revoked. Please log in again." });
+      if (tokenVersion !== (accountDoc.sessionVersion || 0)) {
+        response.status(401).json({
+          message: "Session revoked. Please log in again.",
+          code: "SESSION_REVOKED",
+        });
         return;
       }
       request.account = buildStaffAccount(accountDoc, name, "employee");
       return next();
     }
 
-    // 2. Check in Admin / Super Admin collection
     const adminDoc = await AdminService.get(id);
     if (adminDoc) {
-      if (adminDoc.isActive === false) {
-        response.status(403).json({ message: "Admin account is deactivated" });
+      const status = isAdminBlocked(adminDoc);
+      if (status.blocked) {
+        response
+          .status(403)
+          .json({ message: status.message, code: "ACCOUNT_DISABLED" });
         return;
       }
       const sessionVersion = adminDoc.sessionVersion || 0;
-      if (decoded.sv !== undefined && decoded.sv !== sessionVersion) {
-        response
-          .status(401)
-          .json({ message: "Session revoked. Please log in again." });
+      if (tokenVersion !== sessionVersion) {
+        response.status(401).json({
+          message: "Session revoked. Please log in again.",
+          code: "SESSION_REVOKED",
+        });
         return;
       }
       request.account = {
@@ -137,7 +143,7 @@ export const authenticateJWT = async (
         email: adminDoc.email,
         isApproved: true,
         isActive: adminDoc.isActive ?? true,
-        isSuspended: false,
+        isSuspended: adminDoc.isSuspended === true,
         sessionVersion,
         otp: null,
         notificationPrefs: adminDoc.notificationPrefs || {
@@ -149,8 +155,6 @@ export const authenticateJWT = async (
       return next();
     }
 
-    // 3. Unknown identity — fail closed. Never trust client-supplied claims.
-    console.log("JWT identity not found in DB:", id);
     response.status(401).json({ message: "Invalid token" });
   } catch (err) {
     console.log("JWT Auth error:", err);

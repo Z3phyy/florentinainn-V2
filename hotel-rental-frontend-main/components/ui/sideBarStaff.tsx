@@ -16,6 +16,7 @@ import {
   ExternalLink,
   UserRound,
   BookUser,
+  ClipboardList,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import useStaffNotificationSound from "@/app/hooks/useStaffNotificationSound";
@@ -63,6 +64,12 @@ const navigationItems = [
     url: "/pages/staff/reservation",
     icon: CalendarCheck,
     permision: "reservation management",
+  },
+  {
+    title: "Reservation History",
+    url: "/pages/staff/reservation-history",
+    icon: ClipboardList,
+    permision: "reservation history",
   },
   {
     title: "Rooms & Suites",

@@ -1,3 +1,4 @@
+import { softDeletePlugin } from "../utils/softDelete";
 import mongoose, { Schema } from "mongoose";
 
 const BookingModificationSchema = new Schema(
@@ -5,6 +6,35 @@ const BookingModificationSchema = new Schema(
     field: { type: String, required: true },
     from: { type: String, default: "" },
     to: { type: String, default: "" },
+    note: { type: String, default: "" },
+    changedBy: { type: String, default: "" },
+    changedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
+const BookingAddOnSchema = new Schema(
+  {
+    addOn: { type: Schema.Types.ObjectId, ref: "AddOns", required: true },
+    name: { type: String, required: true },
+    unitPrice: { type: Number, required: true, min: 0 },
+    quantity: { type: Number, required: true, min: 1 },
+    pricingUnit: { type: String, enum: ["per_stay", "per_night"], default: "per_stay" },
+    nights: { type: Number, default: 1 },
+    subtotal: { type: Number, required: true, min: 0 },
+  },
+  { _id: false },
+);
+
+const BillingAdjustmentSchema = new Schema(
+  {
+    reason: { type: String, required: true },
+    previousTotal: { type: Number, default: 0 },
+    newTotal: { type: Number, default: 0 },
+    difference: { type: Number, default: 0 },
+    amountPaid: { type: Number, default: 0 },
+    balanceDue: { type: Number, default: 0 },
+    creditDue: { type: Number, default: 0 },
     note: { type: String, default: "" },
     changedBy: { type: String, default: "" },
     changedAt: { type: Date, default: Date.now },
@@ -44,12 +74,22 @@ const BookingsSchema = new Schema({
   earlyCheckout: { type: Boolean, default: false },
   wasRescheduled: { type: Boolean, default: false },
   verificationCode: { type: String, default: "" },
+  referenceCode: { type: String },
   modificationHistory: { type: [BookingModificationSchema], default: [] },
+  addOns: { type: [BookingAddOnSchema], default: [] },
+  addOnsTotal: { type: Number, default: 0 },
+  billingAdjustments: { type: [BillingAdjustmentSchema], default: [] },
+  revision: { type: Number, default: 0 },
   room: {
     type: Schema.Types.ObjectId,
     ref: "Rooms",
     required: true,
   },
 });
+
+BookingsSchema.plugin(softDeletePlugin);
+BookingsSchema.index({ room: 1, status: 1 });
+BookingsSchema.index({ referenceCode: 1 }, { unique: true, partialFilterExpression: { referenceCode: { $type: "string" } } });
+BookingsSchema.index({ "addOns.addOn": 1, status: 1 });
 
 export default mongoose.model("Bookings", BookingsSchema);

@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { SystemController } from "../controller/system.controller";
+import { BackupController } from "../controller/backup.controller";
+import { handleBackupUpload } from "../utils/backupUpload";
 import { upload } from "../utils/upload";
 import { authenticateJWT, authenticateChatSender } from "../middleware/auth";
 import { requireAdmin, requireSuperAdmin, requirePermission } from "../middleware/requireAdmin";
 import { attachTokenFromQuery } from "../middleware/sseAuth";
-import { authLimiter, otpLimiter, aiLimiter } from "../config/rateLimit";
+import { authLimiter, otpLimiter, aiLimiter, contactLimiter } from "../config/rateLimit";
 
 const route = Router()
 
@@ -13,7 +15,7 @@ const superAdminAuth = [authenticateJWT, requireSuperAdmin];
 
 route.post("/ai", aiLimiter, SystemController.aiChatBot)
 route.post("/ai-suggest-reply", authenticateJWT, SystemController.aiSuggestReply)
-route.post("/ai-forecast", authenticateJWT, SystemController.aiForecastSuggestions)
+route.post("/ai-forecast", aiLimiter, adminAuth, SystemController.aiForecastSuggestions)
 route.get("/", SystemController.getSystemInfo)
 route.get("/payments", adminAuth, SystemController.getAllPayments)
 route.post("/payments/refund", authenticateJWT, requirePermission("payments"), SystemController.refundPayment)
@@ -21,12 +23,22 @@ route.post("/payments/restore", adminAuth, SystemController.restorePayment)
 route.put("/info", adminAuth, SystemController.updateSystemInfo)
 route.post("/logo", adminAuth, upload.single("logo"), SystemController.uploadLogo)
 route.post("/image", adminAuth, upload.single("image"), SystemController.uploadSystemImage)
-route.get("/backup", superAdminAuth, SystemController.createBackup)
-route.post("/backup/restore", superAdminAuth, SystemController.restoreBackup)
+route.get("/backups", superAdminAuth, BackupController.list)
+route.post("/backups", superAdminAuth, BackupController.create)
+route.post("/backups/upload", superAdminAuth, handleBackupUpload, BackupController.upload)
+route.get("/backups/:id/download", superAdminAuth, BackupController.download)
+route.post("/backups/:id/restore", superAdminAuth, BackupController.restore)
+route.delete("/backups/:id", superAdminAuth, BackupController.remove)
 route.post("/admin", authLimiter, SystemController.createAdmin)
 route.get("/admin/status", SystemController.checkAdminRegistrationStatus)
 route.get("/admins", superAdminAuth, SystemController.getAdmins)
+route.post("/admins", superAdminAuth, SystemController.createAdminAccount)
 route.put("/admin/status", superAdminAuth, SystemController.toggleAdminActive)
+route.put("/admin/access-code", superAdminAuth, SystemController.setAdminAccessCode)
+route.delete("/admin", superAdminAuth, SystemController.removeAdminAccount)
+route.get("/access-code", adminAuth, SystemController.getOwnAccessCodeStatus)
+route.get("/email/diagnostics", adminAuth, SystemController.emailDiagnostics)
+route.put("/access-code", adminAuth, SystemController.changeOwnAccessCode)
 route.put("/admin/change-credentials", adminAuth, SystemController.changeAdminCredentials)
 route.post("/forgot-password/send-otp", otpLimiter, SystemController.sendForgotPasswordOtp)
 route.post("/forgot-password/verify-otp", otpLimiter, SystemController.verifyForgotPasswordOtp)
@@ -63,6 +75,6 @@ route.put("/chat/:id/status", authenticateJWT, SystemController.updateChatStatus
 route.put("/chat/:id/seen", authenticateJWT, SystemController.markChatAsSeen)
 route.delete("/chat/:id", authenticateJWT, SystemController.deleteChat)
 
-route.post("/contact", SystemController.sendContactInquiry)
+route.post("/contact", contactLimiter, SystemController.sendContactInquiry)
 
 export default route

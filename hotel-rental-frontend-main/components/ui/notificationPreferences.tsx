@@ -26,6 +26,7 @@ const TYPE_LABELS: Record<string, string> = {
   chat: "Chat",
   payment: "Payments",
   inquiry: "Inquiries",
+  security: "Security",
   system: "System",
 };
 

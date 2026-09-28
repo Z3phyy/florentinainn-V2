@@ -23,6 +23,8 @@ import {
   UserRound,
   CalendarDays,
   SprayCan,
+  ClipboardList,
+  Archive,
 } from "lucide-react";
 import {
   Sidebar,
@@ -69,6 +71,16 @@ const navigationItems = [
     title: "Payment Records",
     url: "/pages/admin/payments",
     icon: CreditCard,
+  },
+  {
+    title: "Reservation History",
+    url: "/pages/admin/reservation-history",
+    icon: ClipboardList,
+  },
+  {
+    title: "Archive",
+    url: "/pages/admin/archive",
+    icon: Archive,
   },
   {
     title: "System Configuration",

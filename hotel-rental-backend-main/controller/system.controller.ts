@@ -19,8 +19,26 @@ import { notificationTemplates } from "../utils/notificationTemplates";
 import { initSSE } from "../utils/sse";
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
-import { sendOtpEmail, sendContactInquiryEmail } from "../utils/sendEmail";
-import { validatePassword, validateEmail } from "../utils/validation";
+import {
+  sendOtpEmail,
+  sendContactInquiryEmail,
+  describeEmailFailure,
+  getEmailProviderStatus,
+  getRecipientDeliveryEvents,
+} from "../utils/sendEmail";
+import crypto from "crypto";
+import {
+  validatePassword,
+  validateEmail,
+  validateAccessCode,
+  normalizeAccessCode,
+  isValidObjectId,
+} from "../utils/validation";
+import { AccessCodeService } from "../services/accessCode.service";
+import { LoginAttemptService } from "../services/loginAttempt.service";
+import { EMAIL_POLICY } from "../config/loginPolicy";
+import { ReservationMonitor, resolveGraceMinutes } from "../services/reservationMonitor.service";
+import { ForecastError, ForecastService } from "../services/forecast.service";
 
 // Escape user-supplied text so it is treated as a literal string, not a regex
 // pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
@@ -29,93 +47,6 @@ function escapeRegex(value: string): string {
 }
 
 export class SystemController {
-
-   static createBackup = async (request : AuthRequest , response : Response) => {
-     try {
-       const db = mongoose.connection.db;
-       if (!db) {
-         response.status(500).send("Database connection unavailable");
-         return;
-       }
-       const collections = await db.listCollections().toArray();
-       const backup: Record<string, any[]> = {};
-       for (const collection of collections) {
-         const docs = await db
-           .collection(collection.name)
-           .find({})
-           .limit(5000)
-           .toArray();
-         backup[collection.name] = docs;
-       }
-       const payload = {
-         exportedAt: new Date().toISOString(),
-         database: db.databaseName,
-         collections: backup,
-       };
-       await logAuditAction({
-         action: "BACKUP_CREATED",
-         details: `Exported ${collections.length} collection(s) from the database`,
-         actorName: request.account?.name || "Administrator",
-         actorRole: request.account?.type || "admin",
-         targetType: "system",
-       });
-       response.send(payload);
-     } catch (error) {
-       console.log("Failed to create backup: " + (error as Error).message);
-       response.status(500).send("Failed to create backup: " + (error as Error).message);
-     }
-   };
-
-   static restoreBackup = async (request : AuthRequest , response : Response) => {
-     try {
-       const { collections } = request.body;
-       if (!collections || typeof collections !== "object" || Array.isArray(collections)) {
-         response.status(400).send("Invalid backup payload. Provide a collections object.");
-         return;
-       }
-
-       const collectionNames = Object.keys(collections);
-       if (collectionNames.length === 0) {
-         response.status(400).send("Backup payload has no collections");
-         return;
-       }
-
-       // Never restore into system-only collections that would break auth.
-       const RESTORE_EXCLUDED = new Set(["admins", "loginattempts"]);
-       const db = mongoose.connection.db;
-       if (!db) {
-         response.status(500).send("Database connection unavailable");
-         return;
-       }
-
-       let insertedCount = 0;
-       for (const name of collectionNames) {
-         if (RESTORE_EXCLUDED.has(name.toLowerCase())) continue;
-         const docs = collections[name];
-         if (!Array.isArray(docs) || docs.length === 0) continue;
-         try {
-           await db.collection(name).deleteMany({});
-           await db.collection(name).insertMany(docs, { ordered: false });
-           insertedCount += docs.length;
-         } catch (err) {
-           console.warn("Skipped restore for collection " + name + ": " + (err as Error).message);
-         }
-       }
-
-       await logAuditAction({
-         action: "BACKUP_RESTORED",
-         details: `Restored ${insertedCount} document(s) across ${collectionNames.length} collection(s)`,
-         actorName: request.account?.name || "Administrator",
-         actorRole: request.account?.type || "admin",
-         targetType: "system",
-       });
-
-       response.send({ success: true, insertedCount, restoredCollections: collectionNames.length });
-     } catch (error) {
-       console.log("Failed to restore backup: " + (error as Error).message);
-       response.status(500).send("Failed to restore backup: " + (error as Error).message);
-     }
-   };
 
    static getAllPayments = async (request : AuthRequest , response : Response) => {
       const { page, limit, search } = request.query;
@@ -129,10 +60,22 @@ export class SystemController {
 
    static refundPayment = async (request : AuthRequest , response : Response) => {
      try {
-       const { paymentId, reason, note } = request.body;
+       const { paymentId } = request.body || {};
+       const reason = typeof request.body?.reason === "string" ? request.body.reason.trim() : "";
+       const note = typeof request.body?.note === "string" ? request.body.note.trim() : "";
 
-       if (!paymentId) {
+       if (!isValidObjectId(paymentId)) {
          response.status(400).send("Payment id is required");
+         return;
+       }
+
+       if (reason.length < 3 || reason.length > 300) {
+         response.status(400).send("A refund reason of 3-300 characters is required");
+         return;
+       }
+
+       if (note.length > 100) {
+         response.status(400).send("Reference number must be at most 100 characters");
          return;
        }
 
@@ -152,11 +95,16 @@ export class SystemController {
 
        const refundRef = note || `RFN-${paymentId.slice(-6).toUpperCase()}`;
 
-       await Paymentservice.markRefunded(paymentId, {
+       const refunded = await Paymentservice.markRefunded(paymentId, {
          refundedBy,
-         refundReason: reason || "",
+         refundReason: reason,
          refundRef,
        });
+
+       if (!refunded) {
+         response.status(409).send("This payment has already been refunded");
+         return;
+       }
 
        await logAuditAction({
          action: "PAYMENT_REFUNDED",
@@ -246,24 +194,29 @@ export class SystemController {
        const admins = await AdminService.getAll();
        const hasAdmin = admins.some((a) => a.type === "admin");
        const hasSuperAdmin = admins.some((a) => a.type === "super admin");
-       const allRegistered = hasAdmin && hasSuperAdmin;
 
        response.send({
-         canRegister: !allRegistered,
+         canRegister: !hasSuperAdmin,
          hasAdmin,
          hasSuperAdmin,
-         admins: admins.map((a) => ({ _id: a._id, email: a.email, type: a.type })),
        });
      } catch (error) {
        console.log("Failed to check admin status: " + (error as Error).message);
-       response.status(500).send("Failed to check admin status: " + (error as Error).message);
+       response.status(500).send("Failed to check admin status");
      }
    };
 
    static getAdmins = async (request: AuthRequest, response: Response) => {
      try {
        const admins = await AdminService.getAllAdmins();
-       response.send(admins.map((a) => a.toObject()));
+       response.send(
+         admins.map((a) => {
+           const plain: Record<string, unknown> = a.toObject();
+           delete plain.accessCodeHash;
+           plain.hasAccessCode = !!plain.accessCodeUpdatedAt;
+           return plain;
+         }),
+       );
      } catch (error) {
        console.log("Failed to get admins: " + (error as Error).message);
        response.status(500).send("Failed to get admins");
@@ -272,50 +225,382 @@ export class SystemController {
 
    static toggleAdminActive = async (request: AuthRequest, response: Response) => {
      try {
-       const { _id, isActive } = request.body;
-       if (!_id) {
-         response.status(400).send("Admin id is required");
+       const { _id, isActive } = request.body || {};
+       const reason =
+         typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : "";
+       const action: string =
+         typeof request.body?.action === "string"
+           ? request.body.action
+           : isActive === false
+             ? "deactivate"
+             : "reactivate";
+
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       if (!["suspend", "unsuspend", "deactivate", "reactivate"].includes(action)) {
+         response.status(400).json({ message: "Invalid account action." });
+         return;
+       }
+       if (_id === request.account?._id) {
+         response.status(400).json({ message: "You cannot change the status of your own account." });
          return;
        }
        const admin = await AdminService.get(_id);
        if (!admin) {
-         response.status(404).send("Admin not found");
+         response.status(404).json({ message: "Admin not found" });
          return;
        }
-       if (admin.type === "super admin" && isActive === false) {
-         response.status(400).send("The super admin cannot be deactivated");
+       if (admin.type === "super admin") {
+         response.status(400).json({ message: "The super admin account cannot be suspended or deactivated." });
          return;
        }
-       await AdminService.setActive(_id, Boolean(isActive));
+
+       const actorName = request.account?.name || "Super Admin";
+       let auditAction = "";
+       let details = "";
+
+       if (action === "suspend") {
+         if (admin.isActive === false) {
+           response.status(400).json({ message: "Admin access has already been revoked." });
+           return;
+         }
+         if (admin.isSuspended) {
+           response.status(400).json({ message: "Admin is already suspended." });
+           return;
+         }
+         await AdminService.suspend(_id, reason, actorName);
+         auditAction = "ADMIN_SUSPENDED";
+         details = `Suspended admin ${admin.email}${reason ? ` — ${reason}` : ""}`;
+       } else if (action === "unsuspend") {
+         if (!admin.isSuspended) {
+           response.status(400).json({ message: "Admin is not suspended." });
+           return;
+         }
+         await AdminService.unsuspend(_id);
+         auditAction = "ADMIN_UNSUSPENDED";
+         details = `Unsuspended admin ${admin.email}`;
+       } else if (action === "deactivate") {
+         if (admin.isActive === false) {
+           response.status(400).json({ message: "Admin access has already been revoked." });
+           return;
+         }
+         await AdminService.deactivate(_id, actorName);
+         auditAction = "ADMIN_DEACTIVATED";
+         details = `Revoked access for admin ${admin.email}${reason ? ` — ${reason}` : ""}`;
+       } else {
+         if (admin.isActive !== false) {
+           response.status(400).json({ message: "Admin is already active." });
+           return;
+         }
+         await AdminService.reactivate(_id);
+         auditAction = "ADMIN_REACTIVATED";
+         details = `Reactivated admin ${admin.email}`;
+       }
+
        await logAuditAction({
-         action: isActive === false ? "ADMIN_DEACTIVATED" : "ADMIN_REACTIVATED",
-         details: `${isActive === false ? "Deactivated" : "Reactivated"} admin ${admin.email}`,
-         actorName: request.account?.name || "Super Admin",
-         actorRole: request.account?.type || "admin",
+         action: auditAction,
+         details,
+         actorName,
+         actorRole: request.account?.type || "super admin",
          targetType: "admin",
          targetId: _id,
        });
        response.send({ message: "Admin status updated" });
      } catch (error) {
-       console.log("Failed to toggle admin: " + (error as Error).message);
-       response.status(500).send("Failed to toggle admin");
+       console.log("Failed to update admin status: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update admin status" });
+     }
+   };
+
+   static createAdminAccount = async (request: AuthRequest, response: Response) => {
+     try {
+       const body = request.body || {};
+       const name = typeof body.name === "string" ? body.name.trim() : "";
+       const email = typeof body.email === "string" ? body.email.trim() : "";
+       const password = typeof body.password === "string" ? body.password : "";
+
+       if (!name) {
+         response.status(400).json({ message: "Name is required." });
+         return;
+       }
+       const emailError = validateEmail(email);
+       if (emailError) {
+         response.status(400).json({ message: emailError });
+         return;
+       }
+       const passError = validatePassword(password);
+       if (passError) {
+         response.status(400).json({ message: passError });
+         return;
+       }
+       const accessCode = normalizeAccessCode(body.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(body.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       if (await AdminService.getByEmail(email)) {
+         response.status(400).json({ message: "Email already used by an admin account" });
+         return;
+       }
+       if (await AccountService.checkEmail(email)) {
+         response.status(400).json({ message: "Email already used by a staff account" });
+         return;
+       }
+
+       const admin = await AdminService.create({
+         name,
+         email,
+         password: await bcrypt.hash(password, 10),
+         otp: null,
+         type: "admin",
+       });
+       if (!admin) {
+         response.status(409).json({
+           message: "An admin account already exists. Revoke and remove it before creating a replacement.",
+         });
+         return;
+       }
+       await AccessCodeService.set("admin", String(admin._id), accessCode);
+
+       await logAuditAction({
+         action: "ADMIN_CREATED",
+         details: `Created admin account ${email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: String(admin._id),
+       });
+       response.status(201).json({ message: "Admin account created" });
+     } catch (error) {
+       console.log("Failed to create admin account: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to create admin account" });
+     }
+   };
+
+   static removeAdminAccount = async (request: AuthRequest, response: Response) => {
+     try {
+       const { _id } = request.body || {};
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       const admin = await AdminService.get(_id);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       if (admin.type === "super admin") {
+         response.status(400).json({ message: "The super admin account cannot be removed." });
+         return;
+       }
+       if (admin.isActive !== false) {
+         response.status(400).json({ message: "Revoke the admin's access before removing the account." });
+         return;
+       }
+       await AdminService.delete(_id);
+       await logAuditAction({
+         action: "ADMIN_REMOVED",
+         details: `Permanently removed admin account ${admin.email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: _id,
+       });
+       response.send({ message: "Admin account removed" });
+     } catch (error) {
+       console.log("Failed to remove admin: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to remove admin account" });
+     }
+   };
+
+   static setAdminAccessCode = async (request: AuthRequest, response: Response) => {
+     try {
+       const { _id } = request.body || {};
+       if (!isValidObjectId(_id)) {
+         response.status(400).json({ message: "A valid admin id is required." });
+         return;
+       }
+       const accessCode = normalizeAccessCode(request.body?.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(request.body?.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       const admin = await AdminService.get(_id);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       if (admin.type === "super admin" && _id !== request.account?._id) {
+         response.status(403).json({ message: "You cannot change another super admin's access code." });
+         return;
+       }
+       const { accessCodeUpdatedAt } = await AccessCodeService.set("admin", _id, accessCode);
+       await LoginAttemptService.reset([`access:${_id}`]);
+       await logAuditAction({
+         action: "ADMIN_ACCESS_CODE_CHANGED",
+         details: `Access code updated for admin ${admin.email}`,
+         actorName: request.account?.name || "Super Admin",
+         actorRole: request.account?.type || "super admin",
+         targetType: "admin",
+         targetId: _id,
+       });
+       response.send({ message: "Admin access code updated.", accessCodeUpdatedAt });
+     } catch (error) {
+       console.log("Failed to set admin access code: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update access code" });
+     }
+   };
+
+   static getOwnAccessCodeStatus = async (request: AuthRequest, response: Response) => {
+     try {
+       const admin = await AdminService.get(request.account?._id || "");
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+       response.send({
+         hasAccessCode: !!admin.accessCodeUpdatedAt,
+         accessCodeUpdatedAt: admin.accessCodeUpdatedAt || null,
+       });
+     } catch (error) {
+       response.status(500).json({ message: "Failed to load access code status" });
+     }
+   };
+
+   static changeOwnAccessCode = async (request: AuthRequest, response: Response) => {
+     try {
+       const adminId = request.account?._id || "";
+       const currentPassword =
+         typeof request.body?.currentPassword === "string" ? request.body.currentPassword : "";
+       if (!currentPassword) {
+         response.status(400).json({ message: "Current password is required." });
+         return;
+       }
+       const accessCode = normalizeAccessCode(request.body?.accessCode);
+       const codeError = validateAccessCode(accessCode);
+       if (codeError) {
+         response.status(400).json({ message: codeError });
+         return;
+       }
+       if (accessCode !== normalizeAccessCode(request.body?.confirmAccessCode)) {
+         response.status(400).json({ message: "Access codes do not match." });
+         return;
+       }
+       const admin = await AdminService.get(adminId);
+       if (!admin) {
+         response.status(404).json({ message: "Admin not found" });
+         return;
+       }
+
+       const passwordKey = `access-change:${adminId}`;
+       const lockStatus = await LoginAttemptService.getStatus(passwordKey, EMAIL_POLICY);
+       if (lockStatus.locked) {
+         response.status(429).json({
+           message: `Too many incorrect password attempts. Try again in ${Math.ceil(lockStatus.retryAfterSeconds / 60)} minute(s).`,
+         });
+         return;
+       }
+       const isMatch = await bcrypt.compare(currentPassword, admin.password);
+       if (!isMatch) {
+         await LoginAttemptService.registerFailure(passwordKey, "access-change", EMAIL_POLICY);
+         response.status(400).json({ message: "Incorrect current password." });
+         return;
+       }
+       await LoginAttemptService.reset([passwordKey]);
+
+       const { accessCodeUpdatedAt } = await AccessCodeService.set("admin", adminId, accessCode);
+       await logAuditAction({
+         action: "ADMIN_ACCESS_CODE_CHANGED",
+         details: `${admin.email} changed their access code`,
+         actorName: request.account?.name || "Administrator",
+         actorRole: request.account?.type || "admin",
+         targetType: "admin",
+         targetId: adminId,
+       });
+       response.send({ message: "Access code updated.", accessCodeUpdatedAt });
+     } catch (error) {
+       console.log("Failed to change access code: " + (error as Error).message);
+       response.status(500).json({ message: "Failed to update access code" });
      }
    };
 
    static updateSystemInfo = async (request: AuthRequest, response: Response) => {
     try {
-      const { systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail } = request.body
+      const { systemInfo, paymentMin, gracePeriodHours, gracePeriodMinutes, systemName, header, description, facebook, contactEmail } = request.body
 
       const updateData: any = { systemInfo, systemName, header, description, facebook, contactEmail };
       const sanitizedPaymentMin = Number(paymentMin);
       if (Number.isFinite(sanitizedPaymentMin) && sanitizedPaymentMin >= 0) {
         updateData.paymentMin = sanitizedPaymentMin;
       }
-      const sanitizedGracePeriod = Number(gracePeriodHours);
-      if (Number.isFinite(sanitizedGracePeriod) && sanitizedGracePeriod >= 0) {
-        updateData.gracePeriodHours = sanitizedGracePeriod;
+      if (gracePeriodMinutes !== undefined && gracePeriodMinutes !== null && gracePeriodMinutes !== "") {
+        const minutes = Number(gracePeriodMinutes);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+          response.status(400).send("Grace period must be a whole number of minutes between 1 and 1440 (24 hours).")
+          return
+        }
+        updateData.gracePeriodMinutes = minutes;
+        updateData.gracePeriodHours = Math.round((minutes / 60) * 100) / 100;
+      } else if (gracePeriodHours !== undefined && gracePeriodHours !== null && gracePeriodHours !== "") {
+        const hours = Number(gracePeriodHours);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+          response.status(400).send("Grace period must be greater than 0 and at most 24 hours.")
+          return
+        }
+        updateData.gracePeriodHours = hours;
+        updateData.gracePeriodMinutes = Math.min(1440, Math.max(1, Math.round(hours * 60)));
       }
 
+      const { securityAlertEmail, securityAlertScope } = request.body || {}
+      if (securityAlertEmail !== undefined || securityAlertScope !== undefined) {
+        const current: any = await SystemService.get()
+        const nextEmail = securityAlertEmail === undefined ? current?.securityAlertEmail || "" : String(securityAlertEmail || "").trim()
+        const nextScope = securityAlertScope === undefined ? current?.securityAlertScope || "admins" : String(securityAlertScope)
+        const changed = nextEmail !== (current?.securityAlertEmail || "") || nextScope !== (current?.securityAlertScope || "admins")
+        if (changed) {
+          if (request.account?.type !== "super admin") {
+            response.status(403).send("Only the super admin can change security alert settings.")
+            return
+          }
+          if (nextEmail && validateEmail(nextEmail)) {
+            response.status(400).send("Security alert email must be a valid email address.")
+            return
+          }
+          if (!["off", "admins", "all"].includes(nextScope)) {
+            response.status(400).send("Security alert scope must be off, admins, or all.")
+            return
+          }
+          updateData.securityAlertEmail = nextEmail
+          updateData.securityAlertScope = nextScope
+          await logAuditAction({
+            action: "SECURITY_ALERT_SETTINGS_UPDATED",
+            details: `Login alert emails: ${nextScope}${nextEmail ? ` → ${nextEmail}` : " (hotel contact email)"}`,
+            actorName: request.account?.name || "Super Admin",
+            actorRole: request.account?.type || "super admin",
+            targetType: "system",
+          })
+        }
+      }
+
+      for (const key of Object.keys(updateData)) {
+        if (updateData[key] === undefined) delete updateData[key]
+      }
+      if (updateData.systemName !== undefined && !String(updateData.systemName).trim()) {
+        response.status(400).send("Hotel name cannot be empty.")
+        return
+      }
       const system = await SystemService.update(updateData)
       response.send(system)
     } catch (error) {
@@ -347,6 +632,12 @@ export class SystemController {
 
       if (type !== "admin" && type !== "super admin") {
         response.status(400).send("Invalid admin type")
+        return
+      }
+
+      const existingAdmins = await AdminService.getAll()
+      if (existingAdmins.some((a) => a.type === "super admin")) {
+        response.status(403).send("Public admin registration is closed. The super admin creates administrator accounts from System Configuration.")
         return
       }
 
@@ -399,7 +690,7 @@ export class SystemController {
         return
       }
 
-      const otp = Math.floor(1000 + Math.random() * 9000).toString()
+      const otp = crypto.randomInt(1000, 10000).toString()
 
       if (admin) {
         await AdminService.updateOtp(email, otp)
@@ -407,7 +698,16 @@ export class SystemController {
         await AccountService.updateOtp(email, otp)
       }
 
-      await sendOtpEmail({ to: email, otp })
+      try {
+        await sendOtpEmail({ to: email, otp })
+      } catch (emailError) {
+        const failure = describeEmailFailure(emailError)
+        if (admin) await AdminService.clearOtp(email)
+        else await AccountService.clearOtp(email)
+        console.log(`Failed to send OTP email: code=${failure.code}`)
+        response.status(502).send("We couldn't send the verification code right now. Please try again later or contact the front desk.")
+        return
+      }
 
       response.send("OTP sent to your email")
     } catch (error) {
@@ -510,7 +810,7 @@ export class SystemController {
       }
 
       const admin = await AdminService.getByEmail(currentEmail)
-      if (!admin) {
+      if (!admin || String(admin._id) !== request.account?._id) {
         response.status(404).send("Admin account not found")
         return
       }
@@ -568,6 +868,30 @@ export class SystemController {
     } catch (error) {
       console.log("Failed to update admin credentials: " + (error as Error).message)
       response.status(500).send("Failed to update admin credentials: " + (error as Error).message)
+    }
+  }
+
+  static emailDiagnostics = async (request: AuthRequest, response: Response) => {
+    try {
+      const provider = await getEmailProviderStatus()
+      const email = typeof request.query.email === "string" ? request.query.email.trim() : ""
+      let events: Awaited<ReturnType<typeof getRecipientDeliveryEvents>> | null = null
+      let eventsError = ""
+      if (email) {
+        if (validateEmail(email)) {
+          response.status(400).send("Please provide a valid email address.")
+          return
+        }
+        try {
+          events = await getRecipientDeliveryEvents(email, 20)
+        } catch (error) {
+          eventsError = describeEmailFailure(error).message
+        }
+      }
+      response.send({ provider, email: email || null, events, eventsError })
+    } catch (error) {
+      console.log("Failed to run email diagnostics: " + (error as Error).message)
+      response.status(500).send("Failed to run email diagnostics")
     }
   }
 
@@ -849,7 +1173,12 @@ Return ONLY the suggested reply message text without any quotes, conversational 
 
       // 1. Dispatch Automated Email via Brevo to both Guest & Hotel Admin
       const system = await SystemService.get();
-      await sendContactInquiryEmail({
+      if (validateEmail(String(email).trim())) {
+        response.status(400).send("Please provide a valid email address.");
+        return;
+      }
+
+      const delivery = await sendContactInquiryEmail({
         guestName: name.trim(),
         guestEmail: email.trim(),
         subject: subject?.trim(),
@@ -876,7 +1205,16 @@ Return ONLY the suggested reply message text without any quotes, conversational 
         targetType: "email",
       });
 
-      response.send({ success: true, message: "Inquiry email dispatched successfully" });
+      if (!delivery.admin.sent) {
+        console.log(`Contact inquiry admin email failed: code=${"code" in delivery.admin ? delivery.admin.code : "unknown"}`);
+      }
+      response.send({
+        success: true,
+        message: delivery.guest.sent
+          ? "Your message was sent. A confirmation email is on its way."
+          : "Your message was received by the hotel, but we couldn't send a confirmation email to your address.",
+        confirmationEmailSent: delivery.guest.sent,
+      });
     } catch (error) {
       console.error("Failed to process contact inquiry email:", error);
       response.status(500).send("Failed to send inquiry email");
@@ -884,91 +1222,146 @@ Return ONLY the suggested reply message text without any quotes, conversational 
   };
 
   static aiForecastSuggestions = async (request: AuthRequest, response: Response) => {
+    let metrics: Awaited<ReturnType<typeof ForecastService.compute>>;
     try {
-      const {
-        forecastData,
-        baseline,
-        peakMonths,
-        slowMonths,
-        totalForecast,
-        projectedOccupancy,
-      } = request.body;
+      const params = ForecastService.parseQuery((request.body || {}) as Record<string, unknown>);
+      metrics = await ForecastService.compute(params);
+    } catch (error) {
+      if (error instanceof ForecastError) {
+        response.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.error("Forecast metrics error:", error);
+      response.status(500).json({ message: "Failed to compute forecast metrics" });
+      return;
+    }
 
-      const model = getAiModel({ temperature: 0.3, maxOutputTokens: 1400 });
+    const digest = {
+      period: `${metrics.period.from} to ${metrics.period.to}`,
+      roomFilter: metrics.filters.roomCategory,
+      activeRooms: metrics.activeRooms,
+      dataQuality: metrics.dataQuality,
+      totals: metrics.totals,
+      trend: metrics.trend,
+      monthly: metrics.monthly
+        .filter((m) => !m.isFuture)
+        .map((m) => ({
+          month: m.label,
+          partial: m.isPartial,
+          bookings: m.bookings,
+          canceled: m.canceled,
+          noShow: m.noShow,
+          occupancyRate: m.occupancyRate,
+          bookedRevenue: m.bookedRevenue,
+          collectedRevenue: m.collectedRevenue,
+        })),
+      seasonality: metrics.seasonality,
+      roomPerformance: metrics.roomPerformance,
+      forecast: {
+        method: metrics.forecast.method,
+        months: metrics.forecast.months.map((m) => ({
+          month: m.label,
+          bookings: m.bookings,
+          range: `${m.low}-${m.high}`,
+          occupancyRate: m.occupancyRate,
+        })),
+      },
+    };
 
-      const prompt = `
-You are a senior hotel revenue management and hospitality operations consultant.
-Analyze the following 6-month hotel occupancy forecast and historical baseline data:
+    if (metrics.dataQuality.confidence === "insufficient") {
+      response.send({
+        status: "insufficient_data",
+        confidence: "insufficient",
+        summary: "There is not enough booking history in the selected range to produce reliable recommendations.",
+        notes: metrics.dataQuality.notes,
+        recommendations: [],
+        metricsUsed: digest,
+        generatedAt: new Date().toISOString(),
+        source: "rules",
+      });
+      return;
+    }
 
-Forecast Metrics:
-- Monthly Baseline: ${sanitizeAiText(String(baseline ?? ""), 100) || "N/A"} average bookings/month
-- 6-Month Projected Volume: ${sanitizeAiText(String(totalForecast ?? ""), 100) || "N/A"} total bookings
-- Projected Peak Surge Months: ${JSON.stringify(peakMonths || [])}
-- Projected Low Occupancy Months: ${JSON.stringify(slowMonths || [])}
-- Full 6-Month Breakdown: ${JSON.stringify(forecastData || [])}
-- Full-House / Sell-Out Risk by Month (projected occupancy % vs rooms): ${JSON.stringify(
-  projectedOccupancy || []
-)}
+    if (!process.env.GEMINI_API_KEY) {
+      response.status(503).json({ message: "AI recommendations are not configured (GEMINI_API_KEY is missing).", metricsUsed: digest });
+      return;
+    }
 
-${GROUNDING_RULES}
+    const prompt = `You are a hotel revenue-management analyst for a small inn in the Philippines (currency PHP).
+You are given metrics that the hotel's system calculated from its own database. These numbers are the only source of truth.
 
-Work ONLY from the numeric data above. Do not invent booking volumes, revenue
-figures, or occupancy rates. Provide strategic, professional recommendations
-divided into exactly these 4 categories:
-1. Dynamic Pricing Strategy (Specific percentage surge pricing, minimum stay rules for peak months, low-demand discount packages, flash sales)
-2. Staffing & Operations Plan (Housekeeping and reception shift scaling, deep cleaning, scheduled AC and room maintenance during slow periods)
-3. Marketing & Outreach Campaign (Early-bird campaigns, launch lead-times 30-45 days before peak dates, corporate weekday packages, repeat guest incentives)
-4. Inventory & Resource Planning (Linen and guest amenity pre-ordering, preventative inspections, supplies buffer)
+METRICS (JSON):
+${JSON.stringify(digest)}
 
-Respond in clean JSON format with this exact structure:
+RULES:
+- Base every statement on the metrics above. Never invent, estimate, or change numbers, dates, room types, or percentages.
+- Every recommendation must cite at least one specific metric value from the JSON in "supportingMetric".
+- Only describe a trend if the metrics show it. If a pattern is weak, or dataQuality.confidence is "low", say so explicitly.
+- Prefer insights about: occupancy changes, room-type performance differences, cancellation or no-show levels, revenue direction, seasonality, and forecast demand.
+- Do not mention guests, names, or personal data.
+- Return between 3 and 6 recommendations, most important first.
+
+Respond with ONLY a JSON object (no markdown) in exactly this shape:
 {
-  "summary": "2-sentence executive summary of the forecast outlook and primary strategic recommendation.",
-  "pricing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "staffing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "marketing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "inventory": ["Recommendation 1", "Recommendation 2", "Recommendation 3"]
-}
+  "summary": "2-3 sentences describing what the data shows and the main priority",
+  "confidenceNote": "one sentence on how much the data supports these conclusions",
+  "recommendations": [
+    {
+      "category": "pricing | operations | marketing | inventory | revenue",
+      "title": "short title",
+      "observedTrend": "what the data shows",
+      "supportingMetric": "the exact metric(s) and values used",
+      "implication": "why it matters for the business",
+      "action": "specific suggested action"
+    }
+  ]
+}`;
 
-Important: Return ONLY the JSON object. Do not include markdown code fences or backticks.
-`;
-
+    try {
+      const model = getAiModel({ temperature: 0.2, maxOutputTokens: 2048 });
       const result = await model.generateContent(prompt);
       const rawText = result.response.text().trim();
-
-      let parsed;
+      const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+      let parsed: any;
       try {
-        const cleaned = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
         parsed = JSON.parse(cleaned);
-      } catch (err) {
-        parsed = {
-          summary: "Forecast analysis generated.",
-          pricing: [
-            `Implement dynamic surge pricing (+15% to +25%) during projected peak months.`,
-            `Offer early-bird and multi-night packages during lower-occupancy periods.`,
-            `Enforce 2-night minimum stay rules on anticipated high-demand weekends.`
-          ],
-          staffing: [
-            `Scale up housekeeping and front-desk coverage by 30% during peak surge windows.`,
-            `Schedule preventative room maintenance and deep cleaning during projected slow months.`,
-            `Implement on-call shift rotations for high check-in turnaround days.`
-          ],
-          marketing: [
-            `Launch early-bird promotional campaigns 30-45 days prior to peak seasonal dates.`,
-            `Target corporate retreats and remote workers with special weekday packages.`,
-            `Send exclusive discount vouchers to past guests to boost off-peak reservations.`
-          ],
-          inventory: [
-            `Pre-order extra linens, toiletries, and supplies 3-4 weeks before peak season.`,
-            `Conduct pre-season audits of air-conditioning units, water heaters, and electronics.`
-          ]
-        };
+      } catch {
+        console.error("AI forecast returned non-JSON output");
+        response.status(502).json({ message: "The AI service returned an unreadable response. Please try again.", metricsUsed: digest });
+        return;
       }
-
-      response.send(parsed);
+      const allowedCategories = ["pricing", "operations", "marketing", "inventory", "revenue"];
+      const recommendations = (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
+        .map((r: any) => ({
+          category: allowedCategories.includes(String(r?.category).toLowerCase()) ? String(r.category).toLowerCase() : "revenue",
+          title: sanitizeAiText(String(r?.title || ""), 120),
+          observedTrend: sanitizeAiText(String(r?.observedTrend || ""), 500),
+          supportingMetric: sanitizeAiText(String(r?.supportingMetric || ""), 300),
+          implication: sanitizeAiText(String(r?.implication || ""), 500),
+          action: sanitizeAiText(String(r?.action || ""), 500),
+        }))
+        .filter((r: any) => r.title && r.action && /\d/.test(r.supportingMetric))
+        .slice(0, 6);
+      if (recommendations.length === 0) {
+        response.status(502).json({ message: "The AI response did not contain recommendations grounded in the metrics. Please try again.", metricsUsed: digest });
+        return;
+      }
+      response.send({
+        status: "ok",
+        confidence: metrics.dataQuality.confidence,
+        summary: sanitizeAiText(String(parsed?.summary || ""), 800),
+        confidenceNote: sanitizeAiText(String(parsed?.confidenceNote || ""), 400),
+        notes: metrics.dataQuality.notes,
+        recommendations,
+        metricsUsed: digest,
+        generatedAt: new Date().toISOString(),
+        source: "ai",
+      });
     } catch (error) {
-      console.error("AI forecast generation error:", error);
-      response.status(500).json({
-        message: "Failed to generate AI suggestions: " + (error as Error).message,
+      console.error("AI forecast generation error:", (error as Error).message);
+      response.status(502).json({
+        message: "The AI service is unavailable right now. The forecast figures above are still accurate; please try the recommendations again later.",
+        metricsUsed: digest,
       });
     }
   };
@@ -1091,9 +1484,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
 
   static getStaffNotifications = async (request: AuthRequest, response: Response) => {
     try {
-      await SystemController.generateArrivalReminders();
-      await SystemController.generateGracePeriodReminders();
-      await SystemController.generateOverdueReminders();
+      await ReservationMonitor.run();
 
       const permissions = request.account?.permisions || [];
       const prefs = request.account?.notificationPrefs;
@@ -1192,7 +1583,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
   static getNotificationPrefsStaff = SystemController.getNotificationPrefs;
 
   private static normalizePrefs(body: any) {
-    const allowedTypes = ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping"];
+    const allowedTypes = ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping", "security"];
     const allowedSeverities = ["info", "success", "warning", "danger"];
     const mutedTypes = Array.isArray(body?.mutedTypes)
       ? body.mutedTypes.filter((t: unknown) => typeof t === "string" && allowedTypes.includes(t))
@@ -1288,140 +1679,6 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       response.send({ success: true, deletedCount: result.deletedCount });
     } catch (error) {
       response.status(500).send("Failed to clear staff notifications: " + (error as Error).message);
-    }
-  };
-
-  private static generateArrivalReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const bookings = await BookingService.getTodayArrivals(todayStr);
-      const seen = new Set<string>();
-
-      for (const booking of bookings) {
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(
-          bookingId,
-          "reservation",
-          "Arrival Today"
-        );
-        if (existing) {
-          await BookingService.markArrivalNotified(bookingId);
-          continue;
-        }
-
-        // Duplicate bookings for the same guest (same phone/name, same date & time)
-        // must produce only ONE "Arrival Today" alert.
-        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${todayStr}|${booking.arrivalTime}`;
-        if (seen.has(guestKey)) {
-          await BookingService.markArrivalNotified(bookingId);
-          continue;
-        }
-        seen.add(guestKey);
-
-        if (!(await BookingService.claimArrivalNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.arrivalToday(booking),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate arrival reminders: " + (error as Error).message);
-    }
-  };
-
-  private static generateOverdueReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const bookings = await BookingService.getOverdueReservations(todayStr);
-      const seen = new Set<string>();
-
-      for (const booking of bookings) {
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(
-          bookingId,
-          "reservation",
-          "Overdue Arrival"
-        );
-        if (existing) {
-          await BookingService.markOverdueNotified(bookingId);
-          continue;
-        }
-
-        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${booking.arrivalDate}|${booking.arrivalTime}`;
-        if (seen.has(guestKey)) {
-          await BookingService.markOverdueNotified(bookingId);
-          continue;
-        }
-        seen.add(guestKey);
-
-        if (!(await BookingService.claimOverdueNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.overdueArrival(booking),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate overdue reminders: " + (error as Error).message);
-    }
-  };
-
-  // Raises ONE alert per booking when today's arrival time has passed and the
-  // guest is now inside the grace window (mirrors the reservation page timer).
-  private static generateGracePeriodReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const system = await SystemService.get();
-      const graceHours = system?.gracePeriodHours ?? 2;
-
-      const bookings = await BookingService.getTodayGraceCandidates(todayStr);
-
-      for (const booking of bookings) {
-        const [hours, minutes] = (booking.arrivalTime || "14:00").split(":").map(Number);
-        const arrivalMs = new Date(booking.arrivalDate).setHours(hours || 14, minutes || 0, 0, 0);
-        const deadlineMs = arrivalMs + graceHours * 60 * 60 * 1000;
-        const nowMs = now.getTime();
-
-        if (nowMs < arrivalMs || nowMs >= deadlineMs) continue;
-
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(bookingId, "reservation", "Grace Period");
-        if (existing) {
-          await BookingService.markGraceNotified(bookingId);
-          continue;
-        }
-
-        if (!(await BookingService.claimGraceNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.gracePeriod(
-            booking,
-            graceHours,
-          ),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate grace period reminders: " + (error as Error).message);
     }
   };
 }

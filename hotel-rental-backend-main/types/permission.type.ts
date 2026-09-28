@@ -11,6 +11,7 @@ export const PERMISSION_VALUES = [
   "payments",
   "notifications",
   "audit logs",
+  "reservation history",
 ] as const;
 
 export type PermissionValue = (typeof PERMISSION_VALUES)[number];
@@ -52,6 +53,7 @@ export const PERMISSION_MATRIX: Record<PermissionValue, string[]> = {
   payments: ["view payment history", "record payment", "process refund"],
   notifications: ["view", "send"],
   "audit logs": ["view"],
+  "reservation history": ["view past reservations", "search & filter history"],
 };
 
 // Map route prefixes/paths to the permission required for a staff member.
@@ -74,6 +76,7 @@ export const ROUTE_PERMISSIONS: { match: string; permission: PermissionValue }[]
   { match: "PATCH /room/discount", permission: "room management" },
   { match: "GET /system/chat", permission: "chat management" },
   { match: "GET /system/audit-logs", permission: "audit logs" },
+  { match: "GET /booking/history", permission: "reservation history" },
 ];
 
 export function normalizePermission(value: string): PermissionValue | null {

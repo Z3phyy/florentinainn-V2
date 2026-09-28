@@ -33,6 +33,18 @@ export interface bookingModification {
   changedAt?: Date;
 }
 
+export interface bookingAddOn {
+  addOn: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  pricingUnit: "per_stay" | "per_night";
+  nights: number;
+  subtotal: number;
+}
+
+export const HOLDING_STATUSES = ["unpaid", "reservation", "active"] as const;
+
 export interface bookingInterfaceInput {
     clientName: string,
     clientAddress: string,
@@ -63,7 +75,10 @@ export interface bookingInterfaceInput {
     earlyCheckout?: boolean,
     wasRescheduled?: boolean,
     verificationCode?: string,
+    referenceCode?: string,
     modificationHistory?: bookingModification[],
+    addOns?: bookingAddOn[],
+    addOnsTotal?: number,
     room : string
 }
 
@@ -97,6 +112,7 @@ export interface bookingInterface  {
     earlyCheckout?: boolean,
     wasRescheduled?: boolean,
     verificationCode?: string,
+    referenceCode?: string,
     modificationHistory?: bookingModification[],
     room : roomInterface,
 }

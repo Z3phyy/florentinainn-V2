@@ -28,7 +28,7 @@ export class AccountService {
   }
 
   static async approve(id : string) {
-    await AccountModel.findByIdAndUpdate(id, { isApproved: true, rejectedAt: null, rejectedReason: "" });
+    await AccountModel.findByIdAndUpdate(id, { isApproved: true, rejectedAt: null, rejectionReason: "", rejectedBy: "" });
   }
 
   static async deactivate(id: string, byName: string) {

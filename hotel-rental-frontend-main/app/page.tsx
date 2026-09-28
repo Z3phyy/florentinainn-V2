@@ -5,8 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import axiosInstance from "./utils/axios";
+import { getApiErrorMessage } from "./utils/apiError";
 import { systemInterface } from "./types/system.type";
 import { roomInterface } from "./types/room.type";
+import { latestReviewsResult } from "./types/review.type";
 import { GuestChatWidget } from "@/components/ui/guestChatWidget";
 import { HotelLocationMap } from "@/components/ui/hotelLocationMap";
 import { Button } from "@/components/ui/button";
@@ -70,46 +72,6 @@ import {
 } from "lucide-react";
 import { FacebookIcon } from "@/components/ui/facebookIcon";
 
-// ── Mock Testimonials ──
-const testimonials = [
-  {
-    id: 1,
-    name: "Maria Santos",
-    role: "Business Traveler",
-    avatar: "MS",
-    content:
-      "Exceptional serenity and beautifully designed rooms. The warm hospitality and attention to detail made my stay unforgettable. Truly a 5-star haven.",
-    rating: 5,
-  },
-  {
-    id: 2,
-    name: "James Rodriguez",
-    role: "Family Vacation",
-    avatar: "JR",
-    content:
-      "Our family had an extraordinary time. The suites were pristine, the pool area was breathtaking, and the 24/7 staff were genuinely accommodating.",
-    rating: 5,
-  },
-  {
-    id: 3,
-    name: "Anna Kim",
-    role: "Couples Getaway",
-    avatar: "AK",
-    content:
-      "A hidden gem of luxury and tranquility! From the plush bedding to the gourmet breakfast, every moment was crafted for relaxation.",
-    rating: 5,
-  },
-  {
-    id: 4,
-    name: "David Chen",
-    role: "Frequent Guest",
-    avatar: "DC",
-    content:
-      "I've stayed at boutique hotels worldwide, but Mellow's warm atmosphere and seamless service stand out. Highly recommended!",
-    rating: 5,
-  },
-];
-
 // ── Curated Hotel Amenities ──
 const hotelAmenities = [
   {
@@ -160,6 +122,11 @@ export default function Home() {
   const router = useRouter();
 
   // ── System info fetch ──
+  const { data: latestReviews, isLoading: latestReviewsLoading } = useQuery<latestReviewsResult>({
+    queryKey: ["latest-reviews"],
+    queryFn: async () => (await axiosInstance.get("/review/latest", { params: { limit: 4 } })).data,
+  });
+
   const {
     data: systemInfo,
     isLoading: systemLoading,
@@ -219,7 +186,7 @@ export default function Home() {
     setSendingContact(true);
     try {
       // Calls /system/contact which dispatches live chat, sends email via Brevo, and logs audit
-      await axiosInstance.post("/system/contact", {
+      const contactResponse = await axiosInstance.post("/system/contact", {
         name: contactName.trim(),
         email: contactEmail.trim(),
         subject: contactSubject.trim(),
@@ -227,16 +194,16 @@ export default function Home() {
       });
 
       toast.success(
-        "Thank you! Your message has been sent to our reception team and an email confirmation was sent to your inbox.",
+        contactResponse.data?.message ||
+          "Thank you! Your message has been sent to our reception team.",
       );
       setContactName("");
       setContactEmail("");
       setContactSubject("");
       setContactMessage("");
     } catch (error) {
-      console.error("Failed to deliver inquiry message:", error);
       toast.error(
-        "Unable to deliver message right now. Please try again or reach us by phone.",
+        getApiErrorMessage(error, "Unable to deliver message right now. Please try again or reach us by phone."),
       );
     } finally {
       setSendingContact(false);
@@ -546,10 +513,22 @@ export default function Home() {
             >
               Contact
             </button>
+            <Link
+              href="/guest/track-booking"
+              className="hover:text-[#900546] transition-colors"
+            >
+              Track My Booking
+            </Link>
           </nav>
 
           {/* Header Action Button */}
           <div className="flex items-center gap-3">
+            <Link
+              href="/guest/track-booking"
+              className="lg:hidden inline-flex h-10 items-center rounded-full border border-[#900546]/40 px-4 text-xs font-semibold text-[#900546] dark:text-[#F968AC] hover:bg-[#900546]/10 transition-colors"
+            >
+              Track Booking
+            </Link>
             <Button
               onClick={() => scrollToSection("rooms-section")}
               className="bg-[#900546] hover:bg-[#720336] text-white rounded-full px-5 sm:px-6 h-10 text-xs sm:text-sm font-medium shadow-md shadow-[#900546]/20 transition-all hover:scale-[1.02] cursor-pointer"
@@ -1494,42 +1473,69 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {testimonials.map((t) => (
-              <div
-                key={t.id}
-                className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#1A0E13] p-6 flex flex-col justify-between hover:shadow-lg hover:border-[#900546]/40 transition-all"
-              >
-                <div>
-                  <div className="flex items-center gap-1 mb-4">
-                    {Array.from({ length: t.rating }).map((_, i) => (
-                      <Star
-                        key={i}
-                        className="size-4 fill-[#F968AC] text-[#F968AC]"
-                      />
-                    ))}
-                  </div>
-                  <p className="text-xs sm:text-sm text-[#130005] dark:text-gray-300 italic leading-relaxed mb-6">
-                    &ldquo;{t.content}&rdquo;
-                  </p>
-                </div>
+          {latestReviewsLoading ? (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-48 rounded-3xl" />
+              ))}
+            </div>
+          ) : !latestReviews || latestReviews.items.length === 0 ? (
+            <div className="mx-auto max-w-xl rounded-3xl border border-dashed border-[#D9C3C3] dark:border-white/10 p-8 text-center text-sm text-[#5C454B] dark:text-gray-400">
+              No guest reviews yet. Stayed with us? Use your reservation code on{" "}
+              <Link href="/guest/track-booking" className="font-semibold text-[#900546] underline underline-offset-4">
+                Track My Booking
+              </Link>{" "}
+              to review your room.
+            </div>
+          ) : (
+            <>
+              {latestReviews.averageRating !== null && (
+                <p className="mb-6 text-center text-sm text-[#5C454B] dark:text-gray-300">
+                  <span className="font-bold text-[#130005] dark:text-white">{latestReviews.averageRating.toFixed(1)} / 5</span> average from{" "}
+                  {latestReviews.reviewCount} verified stay{latestReviews.reviewCount === 1 ? "" : "s"}
+                </p>
+              )}
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {latestReviews.items.map((t) => (
+                  <div
+                    key={t._id}
+                    className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#1A0E13] p-6 flex flex-col justify-between hover:shadow-lg hover:border-[#900546]/40 transition-all"
+                  >
+                    <div>
+                      <div className="flex items-center gap-1 mb-4" aria-label={`${t.rating} out of 5 stars`}>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={`size-4 ${i < t.rating ? "fill-[#F968AC] text-[#F968AC]" : "text-[#D9C3C3]"}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs sm:text-sm text-[#130005] dark:text-gray-300 italic leading-relaxed mb-6 break-words">
+                        &ldquo;{t.comment}&rdquo;
+                      </p>
+                    </div>
 
-                <div className="flex items-center gap-3 pt-4 border-t border-[#D9C3C3] dark:border-white/10">
-                  <div className="size-9 rounded-full bg-[#900546] text-white flex items-center justify-center text-xs font-bold shadow-xs">
-                    {t.avatar}
+                    <div className="flex items-center gap-3 pt-4 border-t border-[#D9C3C3] dark:border-white/10">
+                      <div className="size-9 rounded-full bg-[#900546] text-white flex items-center justify-center text-xs font-bold shadow-xs">
+                        {t.guestName
+                          .split(" ")
+                          .map((part) => part.charAt(0))
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-bold text-[#130005] dark:text-white">{t.guestName}</h4>
+                        <p className="text-[10px] text-[#5C454B] dark:text-gray-400 truncate">
+                          Verified stay{t.roomLabel ? ` · ${t.roomLabel}` : ""}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-[#130005] dark:text-white">
-                      {t.name}
-                    </h4>
-                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
-                      {t.role}
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -1738,10 +1744,10 @@ export default function Home() {
               <ul className="space-y-2 text-xs text-[#E4D1D1]/80">
                 <li>
                   <Link
-                    href="/guest/reservationStatus"
+                    href="/guest/track-booking"
                     className="hover:text-[#F968AC] transition-colors cursor-pointer"
                   >
-                    Check Reservation Status
+                    Track My Booking
                   </Link>
                 </li>
                 <li>

@@ -38,8 +38,11 @@ export function PendingStaffModal() {
 
   const approveMutation = useMutation({
     mutationFn: (_id: string) => axiosInstance.put("/account/approve", { _id }),
-    onSuccess: () => {
-      successAlert("Staff account approved.");
+    onSuccess: (res) => {
+      successAlert("Staff account approved. Assign an access code (key icon) so they can sign in.");
+      if (res.data?.email && !res.data.email.sent) {
+        errorAlert(`The approval email could not be sent (${res.data.email.message || res.data.email.code}). Let the staff member know directly, or check Email Delivery in System Configuration.`);
+      }
       queryClient.invalidateQueries({ queryKey: ["staff"] });
       setOpen(false);
     },

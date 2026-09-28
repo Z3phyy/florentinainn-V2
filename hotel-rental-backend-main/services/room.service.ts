@@ -4,8 +4,12 @@ import { roomInterface, roomInterfaceInput } from "../types/room.type";
 export class RoomService {
 
   static async getAll() {
-    const rooms = RoomModel.find();
+    const rooms = RoomModel.find({ deletedAt: null });
     return rooms
+  }
+
+  static async getActive(id: string) {
+    return RoomModel.findOne({ _id: id, deletedAt: null });
   }
 
   static async get( id : string) {

@@ -10,6 +10,7 @@ import { CheckoutModal } from "./components/checkoutmodal";
 import { PartialPaymentModal } from "./components/partialPaymentModal";
 import { ExtendStayModal } from "./components/extendStayModal";
 import { BookingHistoryDialog } from "../reservation/components/bookingHistoryDialog";
+import { ModifyReservationModal } from "../reservation/components/modifyReservationModal";
 
 export default function Page() {
   const { data: bookings, isLoading } = useQuery<bookingInterface[]>({
@@ -77,8 +78,8 @@ export default function Page() {
             const daysStayed = getDaysFromDate(booking.arrivalDate);
             const room = booking.room;
 
-            const discountedPrice = room.price * (1 - (room.discount || 0) / 100);
-            const stayTotal = Math.max(0, discountedPrice * Math.max(1, daysStayed));
+            const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
+            const stayTotal = Math.max(0, Math.round(discountedPrice * Math.max(1, daysStayed)) + (booking.addOnsTotal || 0));
             const amountPaid = booking.paymentAmount || 0;
             const balanceDue = Math.max(0, stayTotal - amountPaid);
 
@@ -189,8 +190,9 @@ export default function Page() {
                   <PartialPaymentModal booking={booking} />
                   <div className="flex gap-2">
                     <ExtendStayModal booking={booking} />
-                    <CheckoutModal booking={booking} />
+                    <ModifyReservationModal booking={booking} />
                   </div>
+                  <CheckoutModal booking={booking} />
                 </div>
               </div>
             );

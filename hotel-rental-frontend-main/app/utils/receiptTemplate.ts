@@ -10,6 +10,7 @@ export interface ReceiptData {
   amount: number;
   balance: number;
   issuedAt: string;
+  status?: "paid" | "refunded";
 }
 
 function escapeHtml(value: string | number | null | undefined): string {
@@ -70,6 +71,7 @@ export const RECEIPT_STYLES = `
   .rcpt-stamp { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
   .rcpt-stamp.paid { background: #dcfce7; color: #14663f; }
   .rcpt-stamp.partial { background: #fef3c7; color: #92400e; }
+  .rcpt-stamp.refunded { background: #fee2e2; color: #991b1b; }
   .rcpt-sign { margin-top: 18px; padding-top: 6px; border-top: 1px dashed #d9c3c3; text-align: center; font-size: 9px; color: #8a7276; }
 `;
 
@@ -88,7 +90,9 @@ export const STAY_RECEIPT_STYLES = `
 `;
 
 export function buildReceiptHtml(data: ReceiptData): string {
-  const isPartial = Number(data.balance || 0) > 0;
+  const isRefunded = data.status === "refunded";
+  const isPartial = !isRefunded && Number(data.balance || 0) > 0;
+  const stamp = isRefunded ? "refunded" : isPartial ? "partial" : "paid";
 
   return `
   <div class="rcpt">
@@ -143,11 +147,11 @@ export function buildReceiptHtml(data: ReceiptData): string {
 
     <div class="rcpt-foot">
       <div>
-        <p>Status: Verified Payment</p>
+        <p>Status: ${isRefunded ? "Refunded" : "Verified Payment"}</p>
         <p>Thank you for choosing ${escapeHtml(data.hotelName)}!</p>
       </div>
       <div>
-        <span class="rcpt-stamp ${isPartial ? "partial" : "paid"}">${isPartial ? "PARTIAL" : "PAID"}</span>
+        <span class="rcpt-stamp ${stamp}">${stamp.toUpperCase()}</span>
       </div>
     </div>
 
@@ -177,6 +181,7 @@ export interface StayReceiptData {
   showChange: boolean;
   cashierName: string;
   issuedAt: string;
+  reservationCode?: string;
 }
 
 export function buildStayReceiptHtml(data: StayReceiptData): string {
@@ -245,6 +250,11 @@ ${lines}
       <div><span class="rcpt-stamp paid">PAID</span></div>
     </div>
 
+    ${
+      data.reservationCode
+        ? `<p class="rcpt-sign">Reservation code <strong>${escapeHtml(data.reservationCode)}</strong> &middot; use it on Track My Booking to review your stay.</p>`
+        : ""
+    }
     <p class="rcpt-sign">Generated ${escapeHtml(data.issuedAt)} &middot; This receipt is computer generated.</p>
   </div>`;
 }

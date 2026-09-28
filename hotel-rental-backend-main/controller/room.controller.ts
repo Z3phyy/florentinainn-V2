@@ -7,6 +7,12 @@ import { BookingService } from "../services/booking.service";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { NotificationService } from "../services/notification.service";
+import { validateRoomCreate } from "../utils/roomValidation";
+import RoomModel from "../model/room.model";
+import fs from "fs";
+import BookingsModel from "../model/bookings.model";
+import { HOLDING_STATUSES } from "../types/bookings.type";
+import { isValidObjectId } from "../utils/validation";
 
 
 // Helper to build a human-readable room label for audit logs & notifications
@@ -46,55 +52,74 @@ export class RoomController {
 
   static getRoom = async (request: AuthRequest, response: Response) => {
     const { id } = request.params
-    const room = await RoomService.get(id)
+    const room = await RoomService.getActive(id)
     response.send(room)
   }
 
   static createRoom = async (request: AuthRequest, response: Response) => {
+    const discardUpload = () => {
+      if (request.file?.path) {
+        fs.unlink(request.file.path, () => undefined);
+      }
+    };
     try {
+      const body = (request.body || {}) as Record<string, unknown>;
+      const imageUrlFromBody = typeof body.image === "string" ? body.image.trim() : "";
+      const file = request.file;
+      const hasImage = !!file || /^https:\/\/\S+$/i.test(imageUrlFromBody);
 
-
-      // Handle file upload for the 'image' field
-      let imageUrl = "";
-      if (request.file) {
-        imageUrl = await uploadToCloudinary(request.file.path);
+      const { errors, value } = validateRoomCreate(body, hasImage);
+      if (file && !/^image\/(jpeg|png|webp|gif|avif)$/i.test(file.mimetype)) {
+        errors.image = "Room image must be a JPG, PNG, WebP, GIF, or AVIF file.";
+      }
+      if (file && file.size > 10 * 1024 * 1024) {
+        errors.image = "Room image must be 10 MB or smaller.";
       }
 
-      // Build room data from form fields, converting stringified arrays
-      const parsedPrice = Number(request.body.price);
-      const parsedDiscount = Number(request.body.discount || 0);
-      const parsedMaxHead = Number(request.body.maxHead || 1);
-      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-        response.status(400).send("Invalid room price");
+      if (value.roomNumber && !errors.roomNumber) {
+        const escaped = value.roomNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const duplicate = await RoomModel.exists({ roomNumber: { $regex: `^${escaped}$`, $options: "i" }, deletedAt: null });
+        if (duplicate) errors.roomNumber = `Room ${value.roomNumber} already exists.`;
+      }
+
+      if (Object.keys(errors).length > 0) {
+        discardUpload();
+        response.status(400).json({
+          message: Object.values(errors)[0],
+          errors,
+        });
         return;
       }
-      if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0 || parsedDiscount > 100) {
-        response.status(400).send("Invalid discount (0-100)");
-        return;
-      }
-      if (!Number.isFinite(parsedMaxHead) || parsedMaxHead < 1) {
-        response.status(400).send("Invalid max occupancy");
-        return;
+
+      let imageUrl = imageUrlFromBody;
+      if (file) {
+        try {
+          imageUrl = await uploadToCloudinary(file.path);
+        } catch (uploadError) {
+          discardUpload();
+          console.log("Room image upload failed: " + (uploadError as Error).message);
+          response.status(502).json({
+            message: "The room image could not be uploaded. Please try again.",
+            errors: { image: "Image upload failed. Please try again." },
+          });
+          return;
+        }
       }
 
       const roomData: roomInterfaceInput = {
-        roomNumber: request.body.roomNumber || "",
-        category: request.body.category,
-        amenities: parseArrayField(request.body.amenities),
+        roomNumber: value.roomNumber,
+        category: value.category,
+        amenities: parseArrayField(request.body.amenities).map((a) => a.trim()).filter(Boolean).slice(0, 30),
         bedding: parseArrayField(request.body.bedding),
-        price: parsedPrice,
-        maxHead: parsedMaxHead,
-        discount: parsedDiscount,
-        image: imageUrl || request.body.image,
-        description: request.body.description,
-        images: typeof request.body.images === "string"
-          ? JSON.parse(request.body.images)
-          : request.body.images || [],
-        status: request.body.status,
+        price: value.price,
+        maxHead: value.maxHead,
+        discount: value.discount,
+        image: imageUrl,
+        description: value.description,
+        images: [],
+        status: value.status,
         maintenance: "",
-        housekeeping: typeof request.body.housekeeping === "string"
-          ? JSON.parse(request.body.housekeeping)
-          : request.body.housekeeping || [],
+        housekeeping: [],
       };
 
       await RoomService.create(roomData)
@@ -106,10 +131,11 @@ export class RoomController {
         targetType: "room",
       });
       const rooms = await RoomService.getAll()
-      response.send(rooms)
+      response.status(201).send(rooms)
     } catch (error) {
+      discardUpload();
       console.log("Failed to create room: " + (error as Error).message)
-      response.status(500).send("Failed to create room: " + (error as Error).message)
+      response.status(500).json({ message: "Failed to create room. Please try again." })
     }
   }
 
@@ -191,24 +217,37 @@ export class RoomController {
 
   static deleteRoom = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body
-      const room = await RoomService.get(_id)
+      const { _id } = request.body || {}
+      const reason = typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : ""
+      if (!isValidObjectId(_id)) {
+        response.status(400).send("A valid room id is required")
+        return
+      }
+      const room = await RoomService.getActive(_id)
 
       if (!room) {
         response.status(404).send("Room not found")
         return
       }
 
-      const bookingCount = await BookingService.countByRoom(_id)
-      if (bookingCount > 0) {
-        response.status(409).send(`Room cannot be deleted because it has ${bookingCount} booking record${bookingCount === 1 ? "" : "s"}. Delete or reassign those bookings first.`)
+      const holding = await BookingsModel.countDocuments({ room: _id, status: { $in: [...HOLDING_STATUSES] } })
+      if (holding > 0) {
+        response.status(409).send(`Room cannot be archived because it has ${holding} upcoming or in-house booking${holding === 1 ? "" : "s"}. Move or close those bookings first.`)
         return
       }
 
-      await RoomService.delete(_id)
+      const archived = await RoomModel.findOneAndUpdate(
+        { _id, deletedAt: null },
+        { $set: { deletedAt: new Date(), deletedBy: request.account?.name || "Administrator", deleteReason: reason } },
+        { new: true },
+      )
+      if (!archived) {
+        response.status(409).send("Room was already archived")
+        return
+      }
       await logAuditAction({
-        action: "ROOM_DELETED",
-        details: `Deleted room ${getRoomLabel(room)}`,
+        action: "ROOM_ARCHIVED",
+        details: `Archived room ${getRoomLabel(room)}${reason ? ` — ${reason}` : ""}`,
         actorName: request.account?.name || "Administrator",
         actorRole: request.account?.type || "admin",
         targetType: "room",
@@ -217,15 +256,15 @@ export class RoomController {
       const rooms = await RoomService.getAll()
       response.send(rooms)
     } catch (error) {
-      console.log("Failed to delete room: " + (error as Error).message)
-      response.status(500).send("Failed to delete room: " + (error as Error).message)
+      console.log("Failed to archive room: " + (error as Error).message)
+      response.status(500).send("Failed to archive room")
     }
   }
 
   static toggleMaintenance = async (request: AuthRequest, response: Response) => {
     try {
       const { _id, reason, assignedMaintainer, notes } = request.body;
-      const room = await RoomService.get(_id);
+      const room = await RoomService.getActive(_id);
       if (!room) {
         response.status(404).send("Room not found");
         return;
@@ -305,7 +344,7 @@ export class RoomController {
     try {
       const { _id, discount } = request.body;
       const discountNum = Math.min(100, Math.max(0, Number(discount || 0)));
-      const room = await RoomService.get(_id);
+      const room = await RoomService.getActive(_id);
       const roomLabel = getRoomLabel(room);
       await RoomService.updateDiscount(_id, discountNum);
       await logAuditAction({
@@ -377,7 +416,7 @@ export class RoomController {
         return;
       }
 
-      const room = await RoomService.get(_id);
+      const room = await RoomService.getActive(_id);
       if (!room) {
         response.status(404).send("Room not found");
         return;
@@ -437,7 +476,7 @@ export class RoomController {
         response.status(400).send("Room ID is required");
         return;
       }
-      const room = await RoomService.get(_id);
+      const room = await RoomService.getActive(_id);
       if (!room) {
         response.status(404).send("Room not found");
         return;

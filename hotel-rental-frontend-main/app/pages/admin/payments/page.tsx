@@ -47,10 +47,10 @@ import {
   Globe,
   TrendingUp,
   CreditCard,
-  Printer,
   Download,
   FileSpreadsheet,
   RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -59,11 +59,17 @@ import {
   getExportTimestamp,
 } from "@/app/utils/exportFile";
 import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
-import { printHtmlDocument } from "@/app/utils/printDocument";
+import { downloadReceiptPdf, toSafeFilename } from "@/app/utils/receiptPdf";
+import {
+  HOTEL_TIME_ZONE,
+  formatHotelDate,
+  formatHotelDateTime,
+  formatHotelTime,
+  hotelDateKey,
+} from "@/app/utils/hotelTime";
 import {
   buildReceiptHtml,
   RECEIPT_STYLES,
-  RECEIPT_PAGE_CSS,
   ReceiptData,
 } from "@/app/utils/receiptTemplate";
 import { RefundPaymentModal } from "./components/refundPaymentModal";
@@ -98,15 +104,13 @@ function resolvePaymentMethod(p: paymentInterface): {
   return { type: "cash", label: "Cash" };
 }
 
-function formatDate(dateStr: string) {
-  if (!dateStr) return "\u2014";
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("en-PH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+function paymentTimestamp(payment: paymentInterface): string {
+  return payment.createdAt || payment.date;
+}
+
+function paymentTimeMs(payment: paymentInterface): number {
+  const ms = new Date(paymentTimestamp(payment)).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
 }
 
 function formatCurrency(amount: number) {
@@ -171,7 +175,7 @@ export default function Page() {
 
   const [selectedPayment, setSelectedPayment] =
     useState<paymentInterface | null>(null);
-  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
 
   const brand = getBrand(systemInfo);
 
@@ -184,11 +188,15 @@ export default function Page() {
       folioNo: payment.folio || "—",
       guestName: payment.paymentBy || "Guest",
       receivedBy: payment.receivedBy || "Front Desk",
-      dateLabel: formatDate(payment.date),
+      dateLabel: payment.createdAt
+        ? formatHotelDateTime(payment.createdAt)
+        : formatHotelDate(payment.date),
       methodLabel: resolvePaymentMethod(payment).label,
       amount: Number(payment.amount || 0),
       balance: Number(payment.balance || 0),
+      status: payment.status === "refunded" ? "refunded" : "paid",
       issuedAt: new Date().toLocaleString("en-PH", {
+        timeZone: HOTEL_TIME_ZONE,
         year: "numeric",
         month: "short",
         day: "numeric",
@@ -204,31 +212,34 @@ export default function Page() {
     return buildReceiptHtml(buildReceiptData(selectedPayment, brand.logoUrl));
   }, [selectedPayment, buildReceiptData, brand.logoUrl]);
 
-  const handlePrintReceipt = useCallback(async () => {
-    if (!selectedPayment || isPrintingReceipt) return;
+  const handleDownloadReceipt = useCallback(async () => {
+    if (!selectedPayment || isDownloadingReceipt) return;
 
-    setIsPrintingReceipt(true);
+    setIsDownloadingReceipt(true);
     try {
       const inlineLogo = await getLogoDataUrl(brand.logoUrl);
-      const printed = await printHtmlDocument({
-        title: `${brand.hotelName} - Receipt ${
-          selectedPayment.refNumber ||
-          selectedPayment._id.slice(-6).toUpperCase()
-        }`,
-        bodyHtml: buildReceiptHtml(
-          buildReceiptData(selectedPayment, inlineLogo),
-        ),
+      const reference =
+        selectedPayment.refNumber ||
+        `RCP-${selectedPayment._id.slice(-6).toUpperCase()}`;
+      const saved = await downloadReceiptPdf({
+        bodyHtml: buildReceiptHtml(buildReceiptData(selectedPayment, inlineLogo)),
         styles: RECEIPT_STYLES,
-        pageCss: RECEIPT_PAGE_CSS,
+        filename: `${toSafeFilename(`${brand.hotelName}_Receipt_${reference}`)}.pdf`,
+        title: `${brand.hotelName} - Receipt ${reference}`,
       });
-      if (!printed)
-        toast.error("Could not open the print dialog. Please try again.");
+      if (saved) {
+        toast.success("Receipt PDF downloaded.");
+      } else {
+        toast.error("Could not generate the receipt PDF. Please try again.");
+      }
+    } catch {
+      toast.error("Could not generate the receipt PDF. Please try again.");
     } finally {
-      setIsPrintingReceipt(false);
+      setIsDownloadingReceipt(false);
     }
   }, [
     selectedPayment,
-    isPrintingReceipt,
+    isDownloadingReceipt,
     brand.hotelName,
     brand.logoUrl,
     buildReceiptData,
@@ -237,14 +248,13 @@ export default function Page() {
   // Filtered & Sorted Payments
   const filteredPayments = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = hotelDateKey(now);
 
     // One week ago timestamp
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(now.getDate() - 7);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     // First day of current month
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfMonthStr = `${todayStr.slice(0, 7)}-01`;
 
     return payments
       .filter((p) => {
@@ -273,17 +283,15 @@ export default function Page() {
         }
 
         // 3. Date Presets & Custom Range
-        const paymentDate = new Date(p.date);
-        if (isNaN(paymentDate.getTime())) return true;
-
-        const pDateStr = p.date.split("T")[0];
+        const pDateStr = hotelDateKey(paymentTimestamp(p));
+        if (!pDateStr) return true;
 
         if (datePreset === "today") {
           if (pDateStr !== todayStr) return false;
         } else if (datePreset === "week") {
-          if (paymentDate < oneWeekAgo) return false;
+          if (paymentTimeMs(p) < oneWeekAgo.getTime()) return false;
         } else if (datePreset === "month") {
-          if (paymentDate < startOfMonth) return false;
+          if (pDateStr < startOfMonthStr) return false;
         } else if (datePreset === "custom") {
           if (startDate && pDateStr < startDate) return false;
           if (endDate && pDateStr > endDate) return false;
@@ -294,10 +302,10 @@ export default function Page() {
       .sort((a, b) => {
         // Sorting
         if (sortBy === "date-desc") {
-          return new Date(b.date).getTime() - new Date(a.date).getTime();
+          return paymentTimeMs(b) - paymentTimeMs(a);
         }
         if (sortBy === "date-asc") {
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          return paymentTimeMs(a) - paymentTimeMs(b);
         }
         if (sortBy === "amount-desc") {
           return b.amount - a.amount;
@@ -375,20 +383,12 @@ export default function Page() {
   const buildExportRows = () => {
     return filteredPayments.map((p) => {
       const resolved = resolvePaymentMethod(p);
-      const paymentDate = p.date ? new Date(p.date) : new Date();
-      const dateOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleDateString("en-PH", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          })
-        : "";
-      const timeOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleTimeString("en-PH", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "";
+      const dateOnly = formatHotelDate(paymentTimestamp(p), {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const timeOnly = p.createdAt ? formatHotelTime(p.createdAt) : "";
 
       const refNo = p.refNumber || `RCP-${p._id.slice(-8).toUpperCase()}`;
       const folioNo = p.folio || "";
@@ -874,7 +874,12 @@ export default function Page() {
                     >
                       {/* Date */}
                       <TableCell className="text-xs font-medium whitespace-nowrap">
-                        {formatDate(payment.date)}
+                        {formatHotelDate(paymentTimestamp(payment))}
+                        {payment.createdAt ? (
+                          <span className="block text-[10px] font-normal text-muted-foreground">
+                            {formatHotelTime(payment.createdAt)}
+                          </span>
+                        ) : null}
                       </TableCell>
 
                       {/* Reference No. */}
@@ -961,9 +966,9 @@ export default function Page() {
                             size="sm"
                             onClick={() => setSelectedPayment(payment)}
                             className="h-7 px-2 text-[11px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
-                            title="View & Print Official Receipt"
+                            title="View & Download Official Receipt"
                           >
-                            <Printer className="size-3 text-primary" />
+                            <Download className="size-3 text-primary" />
                             <span>Receipt</span>
                           </Button>
                           <RefundPaymentModal payment={payment} />
@@ -1084,7 +1089,7 @@ export default function Page() {
               </DialogTitle>
               <DialogDescription className="text-xs">
                 Review the official receipt for {selectedPayment.paymentBy}{" "}
-                before printing.
+                before downloading.
               </DialogDescription>
             </DialogHeader>
 
@@ -1099,22 +1104,25 @@ export default function Page() {
               </div>
 
               <p className="text-[11px] text-muted-foreground text-center">
-                This is exactly how the receipt will look when printed or saved
-                as PDF.
+                The downloaded PDF uses exactly this receipt layout.
               </p>
 
-              {/* Modal Actions: Print / Close */}
+              {/* Modal Actions: Download / Close */}
               <DialogFooter className="flex-row items-center justify-between sm:justify-between gap-2 pt-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={handlePrintReceipt}
-                  disabled={isPrintingReceipt}
+                  onClick={handleDownloadReceipt}
+                  disabled={isDownloadingReceipt}
                   className="text-xs gap-1.5 cursor-pointer"
                 >
-                  <Printer className="size-3.5 text-primary" />
-                  {isPrintingReceipt ? "Preparing..." : "Print / Save as PDF"}
+                  {isDownloadingReceipt ? (
+                    <Loader2 className="size-3.5 animate-spin text-primary" />
+                  ) : (
+                    <Download className="size-3.5 text-primary" />
+                  )}
+                  {isDownloadingReceipt ? "Generating PDF..." : "Download PDF"}
                 </Button>
 
                 <Button

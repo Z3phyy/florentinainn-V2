@@ -1,4 +1,4 @@
-export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system" | "housekeeping";
+export type NotificationType = "account" | "reservation" | "maintenance" | "chat" | "payment" | "inquiry" | "system" | "housekeeping" | "security";
 export type NotificationSeverity = "info" | "success" | "warning" | "danger";
 
 export interface NotificationItem {

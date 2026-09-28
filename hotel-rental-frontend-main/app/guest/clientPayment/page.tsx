@@ -21,9 +21,10 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import { bookingInterface } from "@/app/types/bookings.type";
+import { publicBookingInterface } from "@/app/types/bookings.type";
 import { systemInterface } from "@/app/types/system.type";
 import Link from "next/link";
+import { RoomReviewPanel } from "@/components/ui/roomReviewPanel";
 
 function PaymentSuccessContent() {
   const searchParams = useSearchParams();
@@ -33,15 +34,17 @@ function PaymentSuccessContent() {
   const gateway = searchParams.get("gateway") || "paymongo";
   const sessionId = searchParams.get("session_id");
 
-  const [verificationCode, setVerificationCode] = useState("");
+  const codeParam = searchParams.get("code") || "";
+  const [storedCode, setStoredCode] = useState("");
+  const verificationCode = codeParam || storedCode;
 
   useEffect(() => {
-    if (!bookingId) return;
+    if (!bookingId || codeParam) return;
     try {
       const stored = sessionStorage.getItem(`reservation_code_${bookingId}`);
-      if (stored) setVerificationCode(stored);
+      if (stored) setStoredCode(stored);
     } catch {}
-  }, [bookingId]);
+  }, [bookingId, codeParam]);
 
   const { data: systemInfo } = useQuery<systemInterface>({
     queryKey: ["systeminfo"],
@@ -53,7 +56,7 @@ function PaymentSuccessContent() {
 
   const { data: bookingInfo, isLoading } = useQuery({
     queryKey: ["bookingInfo", bookingId],
-    queryFn: async (): Promise<bookingInterface> => {
+    queryFn: async (): Promise<publicBookingInterface> => {
       if (!bookingId) throw new Error("No booking ID");
       const response = await axiosInstance.get(`/booking/${bookingId}`);
       return response.data;
@@ -172,7 +175,11 @@ function PaymentSuccessContent() {
     minute: "2-digit",
   });
 
-  const total = Number(amount || bookingInfo?.room?.price || 0);
+  const amountPaid = Number(bookingInfo?.paymentAmount) > 0 ? Number(bookingInfo?.paymentAmount) : Number(amount || 0);
+  const stayTotalAmount = Number(bookingInfo?.totalAmount || 0);
+  const balanceDue = Math.max(0, stayTotalAmount - amountPaid);
+  const fmt = (v: number) =>
+    v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const hotelName = systemInfo?.systemName || "Florentina Inn";
   const logoUrl = systemInfo?.logo || "/Florentina Inn Logo.png";
@@ -407,7 +414,7 @@ function PaymentSuccessContent() {
                       : "RSV-ONLINE"}
                   </p>
                   <p className="text-[10px] font-mono font-semibold text-[#618685] mt-0.5">
-                    VERIFY CODE: {verificationCode || "—"}
+                    RESERVATION CODE: {verificationCode || "—"}
                   </p>
                 </div>
               </div>
@@ -475,29 +482,42 @@ function PaymentSuccessContent() {
 
               {/* Financial Breakdown Table */}
               <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#130005] p-4 space-y-2 text-xs">
-                <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
-                  <span>Room Reservation Rate</span>
-                  <span className="font-medium text-[#130005] dark:text-white">
-                    ₱
-                    {total.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
+                {bookingInfo?.roomSubtotal !== undefined && (
+                  <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
+                    <span>
+                      Room ({bookingInfo.nights ?? 1} night{(bookingInfo.nights ?? 1) === 1 ? "" : "s"})
+                    </span>
+                    <span className="font-medium text-[#130005] dark:text-white">₱{fmt(Number(bookingInfo.roomSubtotal))}</span>
+                  </div>
+                )}
+                {(bookingInfo?.addOns || []).map((addOn, index) => (
+                  <div key={`${addOn.name}-${index}`} className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
+                    <span>
+                      {addOn.quantity}× {addOn.name}
+                      {addOn.pricingUnit === "per_night" ? ` × ${addOn.nights} night${addOn.nights === 1 ? "" : "s"}` : ""}
+                    </span>
+                    <span className="font-medium text-[#130005] dark:text-white">₱{fmt(addOn.subtotal)}</span>
+                  </div>
+                ))}
+                {stayTotalAmount > 0 && (
+                  <div className="flex items-center justify-between font-semibold text-[#130005] dark:text-white">
+                    <span>Estimated Stay Total</span>
+                    <span>₱{fmt(stayTotalAmount)}</span>
+                  </div>
+                )}
                 <div className="h-px bg-[#D9C3C3] dark:bg-white/10 my-1" />
                 <div className="flex items-center justify-between text-sm font-bold text-[#130005] dark:text-white">
                   <span className="font-serif text-[#900546] dark:text-[#F968AC]">
                     Total Amount Paid
                   </span>
-                  <span className="text-[#900546] dark:text-[#F968AC]">
-                    ₱
-                    {total.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
+                  <span className="text-[#900546] dark:text-[#F968AC]">₱{fmt(amountPaid)}</span>
                 </div>
+                {balanceDue > 0 && (
+                  <div className="flex items-center justify-between text-[#5C454B] dark:text-gray-400">
+                    <span>Balance due at the front desk</span>
+                    <span className="font-semibold text-[#130005] dark:text-white">₱{fmt(balanceDue)}</span>
+                  </div>
+                )}
               </div>
 
               <div className="rounded-2xl border border-[#900546]/30 bg-[#900546]/5 p-3.5 text-[11px] leading-relaxed text-[#5C454B] dark:text-gray-300">
@@ -523,6 +543,12 @@ function PaymentSuccessContent() {
             </div>
           </div>
         </div>
+
+        {bookingId && bookingInfo && (
+          <div className="print:hidden">
+            <RoomReviewPanel bookingId={bookingId} reservationCode={verificationCode} />
+          </div>
+        )}
       </div>
     </div>
   );

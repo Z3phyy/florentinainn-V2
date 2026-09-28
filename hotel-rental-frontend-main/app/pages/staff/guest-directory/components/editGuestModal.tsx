@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { errorAlert, successAlert } from "@/app/utils/alert";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { guestRecordSchema } from "@/app/utils/schemas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/formField";
 import {
   Dialog,
   DialogContent,
@@ -19,50 +24,61 @@ import {
 import { Loader2, Pencil } from "lucide-react";
 import type { GuestDirectoryEntry } from "../page";
 
+type Values = z.input<typeof guestRecordSchema>;
+
+const valuesFromGuest = (guest: GuestDirectoryEntry): Values => ({
+  name: guest.name || "",
+  email: guest.email || "",
+  phone: guest.phone || "",
+  address: guest.address || "",
+});
+
 export function EditGuestModal({ guest }: { guest: GuestDirectoryEntry }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (open) {
-      setName(guest.name || "");
-      setEmail(guest.email || "");
-      setPhone(guest.phone || "");
-      setAddress(guest.address || "");
-    }
-  }, [open, guest]);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    trigger,
+    formState: { errors, isDirty },
+  } = useForm<Values>({
+    resolver: zodResolver(guestRecordSchema),
+    mode: "onTouched",
+    defaultValues: valuesFromGuest(guest),
+  });
 
   const updateMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (values: Values) =>
       axiosInstance.put("/booking/directory", {
         key: guest.key,
-        clientName: name.trim(),
-        clientEmail: email.trim(),
-        clientPhone: phone.trim(),
-        clientAddress: address.trim(),
+        clientName: values.name.trim(),
+        clientEmail: values.email.trim(),
+        clientPhone: values.phone.trim(),
+        clientAddress: values.address.trim(),
       }),
     onSuccess: () => {
       successAlert("Guest record updated across their bookings.");
       queryClient.invalidateQueries({ queryKey: ["guest-directory"] });
       queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
       queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      queryClient.invalidateQueries({ queryKey: ["reservation-history"] });
       setOpen(false);
     },
-    onError: (err: { response?: { data?: string } }) => {
-      const message =
-        typeof err.response?.data === "string"
-          ? err.response.data
-          : "Failed to update guest record.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to update guest record."));
     },
   });
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) reset(valuesFromGuest(guest));
+      }}
+    >
       <DialogTrigger asChild>
         <Button
           variant="ghost"
@@ -81,58 +97,48 @@ export function EditGuestModal({ guest }: { guest: GuestDirectoryEntry }) {
             {guest.totalStays} record{guest.totalStays !== 1 ? "s" : ""}).
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="space-y-2">
-            <Label htmlFor="guest-name">Guest Name</Label>
-            <Input
-              id="guest-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="guest-email">Email</Label>
+        <form
+          onSubmit={handleSubmit((values) => updateMutation.mutate(values))}
+          className="space-y-4"
+          noValidate
+        >
+          <FormField id="guest-name" label="Guest Name" required error={errors.name?.message}>
+            <Input id="guest-name" aria-invalid={!!errors.name} {...register("name")} />
+          </FormField>
+          <FormField id="guest-email" label="Email" error={errors.email?.message}>
             <Input
               id="guest-email"
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={!!errors.email}
+              {...register("email", { onChange: () => trigger("phone") })}
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="guest-phone">Phone</Label>
-            <Input
-              id="guest-phone"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="guest-address">Address</Label>
-            <Input
-              id="guest-address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => updateMutation.mutate()}
-            disabled={updateMutation.isPending || !name.trim()}
+          </FormField>
+          <FormField
+            id="guest-phone"
+            label="Phone"
+            error={errors.phone?.message}
+            hint="An email or phone number is required."
           >
-            {updateMutation.isPending ? (
-              <>
-                <Loader2 className="size-4 animate-spin" /> Saving...
-              </>
-            ) : (
-              "Save Record"
-            )}
-          </Button>
-        </DialogFooter>
+            <Input id="guest-phone" aria-invalid={!!errors.phone} {...register("phone")} />
+          </FormField>
+          <FormField id="guest-address" label="Address" required error={errors.address?.message}>
+            <Input id="guest-address" aria-invalid={!!errors.address} {...register("address")} />
+          </FormField>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={updateMutation.isPending || !isDirty}>
+              {updateMutation.isPending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Saving...
+                </>
+              ) : (
+                "Save Record"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

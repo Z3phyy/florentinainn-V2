@@ -2,8 +2,15 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
-import { bookingInterface } from "@/app/types/bookings.type";
-import { systemInterface } from "@/app/types/system.type";
+import useNotificationStream from "@/app/hooks/useNotificationStream";
+import { getApiErrorMessage } from "@/app/utils/apiError";
+import { formatHotelDate, hotelDateKey } from "@/app/utils/hotelTime";
+import { peso } from "@/app/utils/addOnPricing";
+import {
+  arrivalState,
+  reservationBoard,
+  reservationBoardItem,
+} from "@/app/types/bookings.type";
 import {
   Loader2,
   Bed,
@@ -18,40 +25,55 @@ import {
   Phone,
   Wallet,
   UserX,
+  PackagePlus,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { confirmAlert } from "@/app/utils/alert";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { confirmAlert, errorAlert, successAlert } from "@/app/utils/alert";
 import { formatTime12hr } from "@/app/utils/customFunction";
-import { RescheduleReservationModal } from "./components/rescheduleReservationModal";
+import { ModifyReservationModal } from "./components/modifyReservationModal";
 import { BookingHistoryDialog } from "./components/bookingHistoryDialog";
 
 export default function Page() {
   const queryClient = useQueryClient();
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
 
-  const { data: systemInfo } = useQuery<systemInterface>({
-    queryKey: ["systeminfo"],
+  const { data: board, isLoading, isError, refetch, isFetching } = useQuery<reservationBoard>({
+    queryKey: ["reservation-board"],
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
-      const res = await axiosInstance.get("/system");
+      const requestedAt = Date.now();
+      const res = await axiosInstance.get("/booking/reservations/board");
+      const receivedAt = Date.now();
+      const serverMs = new Date(res.data.serverTime).getTime();
+      if (Number.isFinite(serverMs)) {
+        setClockOffsetMs(serverMs - (requestedAt + receivedAt) / 2);
+      }
       return res.data;
     },
   });
+  const bookings = board?.items;
 
-  const { data: bookings, isLoading } = useQuery<bookingInterface[]>({
-    queryKey: ["reservation-bookings"],
-    queryFn: async () => {
-      const res = await axiosInstance.get("/booking", {
-        params: { status: "reservation" },
-      });
-      const all: bookingInterface[] = res.data;
-      return all.filter((b) => b.status === "reservation");
-    },
+  useNotificationStream("staff", () => {
+    queryClient.invalidateQueries({ queryKey: ["reservation-board"] });
   });
+
+  const refreshBoard = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["reservation-board"] }),
+    [queryClient],
+  );
 
   const activateMutation = useMutation({
     mutationFn: (bookingId: string) =>
       axiosInstance.post("/booking/reservation/active", { bookingId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reservation-bookings"] });
+      successAlert("Guest checked in.");
+      refreshBoard();
+      queryClient.invalidateQueries({ queryKey: ["active-bookings"] });
+    },
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to check in the guest."));
+      refreshBoard();
     },
   });
 
@@ -59,7 +81,12 @@ export default function Page() {
     mutationFn: ({ bookingId, reason }: { bookingId: string; reason?: string }) =>
       axiosInstance.post("/booking/reservation/cancel", { bookingId, reason }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reservation-bookings"] });
+      successAlert("Reservation canceled.");
+      refreshBoard();
+    },
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to cancel the reservation."));
+      refreshBoard();
     },
   });
 
@@ -70,7 +97,12 @@ export default function Page() {
         reason,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reservation-bookings"] });
+      successAlert("Reservation marked as no-show.");
+      refreshBoard();
+    },
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to mark as no-show."));
+      refreshBoard();
     },
   });
 
@@ -89,7 +121,7 @@ export default function Page() {
           <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
             {isLoading
               ? "Loading reservations..."
-              : `${bookings?.length ?? 0} pending reservation${(bookings?.length ?? 0) !== 1 ? "s" : ""} scheduled`}
+              : `${bookings?.length ?? 0} pending reservation${(bookings?.length ?? 0) !== 1 ? "s" : ""} scheduled · grace period ${formatGrace(board?.graceMinutes ?? 120)}`}
           </p>
         </div>
       </div>
@@ -101,6 +133,21 @@ export default function Page() {
             <Loader2 className="size-6 animate-spin text-[#900546]" />
             <span>Loading upcoming reservations...</span>
           </div>
+        </div>
+      )}
+
+      {!isLoading && isError && (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-destructive/30 bg-destructive/5 py-16 text-center">
+          <AlertTriangle className="size-8 text-destructive" />
+          <p className="text-sm font-medium text-destructive">Reservations could not be loaded.</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="rounded-xl border border-[#D9C3C3] px-4 py-2 text-xs font-semibold"
+          >
+            Try again
+          </button>
         </div>
       )}
 
@@ -136,7 +183,8 @@ export default function Page() {
               isActivating={activateMutation.isPending}
               isCanceling={cancelMutation.isPending}
               isNoShowing={noShowMutation.isPending}
-              gracePeriodHours={systemInfo?.gracePeriodHours}
+              clockOffsetMs={clockOffsetMs}
+              onStateChange={refreshBoard}
             />
           ))}
         </div>
@@ -147,6 +195,37 @@ export default function Page() {
 
 /* ─── Individual Reservation Card ─── */
 
+const formatGrace = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h} hr${h === 1 ? "" : "s"}`;
+  return `${m} min`;
+};
+
+const fmtDuration = (ms: number): string => {
+  if (ms <= 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m`;
+  if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
+  return `${s}s`;
+};
+
+function resolveState(booking: reservationBoardItem, nowMs: number): arrivalState {
+  const arrivalMs = booking.arrivalAt ? new Date(booking.arrivalAt).getTime() : NaN;
+  const graceEndMs = booking.graceEndsAt ? new Date(booking.graceEndsAt).getTime() : NaN;
+  if (!Number.isFinite(arrivalMs) || !Number.isFinite(graceEndMs)) return booking.arrivalState;
+  if (nowMs >= graceEndMs) return "overdue";
+  if (nowMs >= arrivalMs) return "grace";
+  if (booking.arrivalState === "arriving" || hotelDateKey(new Date(nowMs)) === booking.arrivalDate) return "arriving";
+  return "upcoming";
+}
+
 function ReservationCard({
   booking,
   onActivate,
@@ -155,77 +234,52 @@ function ReservationCard({
   isActivating,
   isCanceling,
   isNoShowing,
-  gracePeriodHours,
+  clockOffsetMs,
+  onStateChange,
 }: {
-  booking: bookingInterface;
+  booking: reservationBoardItem;
   onActivate: (id: string) => void;
   onCancel: (params: { id: string; reason?: string }) => void;
   onNoShow: (params: { id: string; reason?: string }) => void;
   isActivating: boolean;
   isCanceling: boolean;
   isNoShowing: boolean;
-  gracePeriodHours?: number;
+  clockOffsetMs: number;
+  onStateChange: () => void;
 }) {
-  const graceHrs = gracePeriodHours ?? 2;
-  const [timeRemaining, setTimeRemaining] = useState<string>("");  const [isLate, setIsLate] = useState(false);
-  const [isToday, setIsToday] = useState(false);
-  const [timerVariant, setTimerVariant] = useState<"arriving" | "grace" | null>(null);
-
-  const fmtDuration = (ms: number): string => {
-    if (ms <= 0) return "0s";
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h > 0) return `${h}h ${m.toString().padStart(2, "0")}m ${s.toString().padStart(2, "0")}s`;
-    if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
-    return `${s}s`;
-  };
+  const [nowMs, setNowMs] = useState(() => Date.now() + clockOffsetMs);
 
   useEffect(() => {
-    const updateTimer = () => {
-      const now = new Date();
-      const [hours, minutes] = (booking.arrivalTime || "14:00").split(":").map(Number);
-      const arrivalMs = new Date(booking.arrivalDate).setHours(hours || 14, minutes || 0, 0, 0);
-
-      const today = new Date();
-      const isArrivalToday =
-        arrivalMs > 0 &&
-        new Date(arrivalMs).getFullYear() === today.getFullYear() &&
-        new Date(arrivalMs).getMonth() === today.getMonth() &&
-        new Date(arrivalMs).getDate() === today.getDate();
-
-      setIsToday(isArrivalToday);
-
-      const nowMs = now.getTime();
-      const deadlineMs = arrivalMs + graceHrs * 60 * 60 * 1000;
-
-      if (!isArrivalToday) {
-        setTimeRemaining("");
-        setIsLate(false);
-        setTimerVariant(null);
-        return;
-      }
-
-      if (nowMs < arrivalMs) {
-        setIsLate(false);
-        setTimerVariant("arriving");
-        setTimeRemaining(`Arrives in ${fmtDuration(arrivalMs - nowMs)}`);
-      } else if (nowMs < deadlineMs) {
-        setIsLate(false);
-        setTimerVariant("grace");
-        setTimeRemaining(`Grace ends in ${fmtDuration(deadlineMs - nowMs)}`);
-      } else {
-        setIsLate(true);
-        setTimerVariant(null);
-        setTimeRemaining("");
-      }
-    };
-
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
+    const tick = () => setNowMs(Date.now() + clockOffsetMs);
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [booking.arrivalDate, booking.arrivalTime]);
+  }, [clockOffsetMs]);
+
+  const state = resolveState(booking, nowMs);
+  const serverState = booking.arrivalState;
+
+  const requestedFor = useRef("");
+  useEffect(() => {
+    if (state !== serverState && requestedFor.current !== state) {
+      requestedFor.current = state;
+      onStateChange();
+    }
+  }, [state, serverState, onStateChange]);
+
+  const arrivalMs = booking.arrivalAt ? new Date(booking.arrivalAt).getTime() : 0;
+  const graceEndMs = booking.graceEndsAt ? new Date(booking.graceEndsAt).getTime() : 0;
+  const timeRemaining =
+    state === "arriving"
+      ? `Arrives in ${fmtDuration(arrivalMs - nowMs)}`
+      : state === "grace"
+        ? `Grace ends in ${fmtDuration(graceEndMs - nowMs)}`
+        : state === "overdue"
+          ? `Overdue by ${fmtDuration(nowMs - graceEndMs)}`
+          : "";
+  const isLate = state === "overdue";
+  const isToday = state === "arriving" || state === "grace";
+  const timerVariant = state === "grace" ? "grace" : state === "arriving" ? "arriving" : null;
 
   const room = booking.room;
 
@@ -248,7 +302,12 @@ function ReservationCard({
 
           {/* Status badge */}
           <div className="absolute top-3 left-3">
-            {isLate ? (
+            {state === "grace" ? (
+              <div className="flex items-center gap-1.5 rounded-full bg-amber-500/95 backdrop-blur-sm px-3 py-1 text-xs font-bold text-white shadow-sm">
+                <Clock className="size-3.5" />
+                Grace Period
+              </div>
+            ) : isLate ? (
               <div className="flex items-center gap-1.5 rounded-full bg-rose-600/95 backdrop-blur-sm px-3 py-1 text-xs font-bold text-white shadow-sm">
                 <AlertTriangle className="size-3.5" />
                 OVERDUE
@@ -267,10 +326,12 @@ function ReservationCard({
           </div>
 
           {/* Countdown Timer */}
-          {isToday && !isLate && timerVariant && timeRemaining && (
+          {timeRemaining && (isToday || isLate) && (
             <div
               className={`absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full backdrop-blur-sm px-3 py-1 text-xs font-semibold shadow-sm ${
-                timerVariant === "grace"
+                isLate
+                  ? "bg-rose-600 text-white border border-rose-500"
+                  : timerVariant === "grace"
                   ? "bg-amber-500 text-white border border-amber-400"
                   : "bg-white/95 dark:bg-[#130005]/95 text-[#900546] dark:text-[#F968AC] border border-[#D9C3C3]"
               }`}
@@ -303,14 +364,14 @@ function ReservationCard({
               <User className="size-3.5 text-[#618685] shrink-0" />
               <span className="truncate">{booking.clientName}</span>
             </div>
+            {booking.referenceCode && (
+              <div className="font-mono text-[11px] text-[#5C454B] dark:text-gray-400">{booking.referenceCode}</div>
+            )}
             <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
               <CalendarDays className="size-3.5 text-[#618685] shrink-0" />
               <span>
-                Arrival: {new Date(booking.arrivalDate).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
+                Arrival: {formatHotelDate(booking.arrivalDate)}
+                {booking.departureDate ? ` → ${formatHotelDate(booking.departureDate)}` : ""}
               </span>
             </div>
             <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
@@ -329,6 +390,22 @@ function ReservationCard({
                 <span className="truncate">{booking.clientPhone}</span>
               </div>
             )}
+            {(booking.addOns || []).length > 0 && (
+              <div className="flex items-start gap-2 text-[#5C454B] dark:text-gray-400">
+                <PackagePlus className="size-3.5 text-[#618685] shrink-0 mt-0.5" />
+                <span>
+                  {(booking.addOns || []).map((a) => `${a.quantity}× ${a.name}`).join(", ")} · {peso(booking.addOnsTotal || 0)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
+              <Wallet className="size-3.5 text-[#618685] shrink-0" />
+              <span>
+                Stay total {peso(booking.plannedTotal)}
+                {booking.balanceDue > 0 ? ` · balance ${peso(booking.balanceDue)}` : ""}
+                {booking.creditDue > 0 ? ` · credit ${peso(booking.creditDue)}` : ""}
+              </span>
+            </div>
             {(booking.paymentAmount ?? 0) > 0 && (
               <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
                 <Wallet className="size-3.5 text-[#618685] shrink-0" />
@@ -358,7 +435,7 @@ function ReservationCard({
             <CheckCircle2 className="size-4" />
             <span>Check-In</span>
           </button>
-          <RescheduleReservationModal booking={booking} />
+          <ModifyReservationModal booking={booking} />
         </div>
         <div className="flex gap-2.5">
           <button

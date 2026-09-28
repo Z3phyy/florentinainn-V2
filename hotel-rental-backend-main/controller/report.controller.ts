@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../types/request.type";
 import { ReportService, ReportMonth } from "../services/report.service";
+import { ForecastError, ForecastService } from "../services/forecast.service";
 
 function parseMonth(raw: unknown): ReportMonth {
   if (typeof raw === "string" && raw.trim().toLowerCase() === "all") {
@@ -22,6 +23,20 @@ function parseYear(raw: unknown): number {
 }
 
 export class ReportController {
+  static getForecast = async (request: AuthRequest, response: Response) => {
+    try {
+      const params = ForecastService.parseQuery(request.query as Record<string, unknown>);
+      response.send(await ForecastService.compute(params));
+    } catch (error) {
+      if (error instanceof ForecastError) {
+        response.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.log("Failed to compute forecast: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to compute forecast" });
+    }
+  };
+
   static getOccupancyReport = async (
     request: AuthRequest,
     response: Response,

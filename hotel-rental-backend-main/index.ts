@@ -7,6 +7,9 @@ import helmet from "helmet"
 import dotenv from 'dotenv';
 import 'dotenv/config';
 import systemModel from './model/system.model';
+import { BackupService } from './services/backup.service';
+import { ReservationMonitor } from './services/reservationMonitor.service';
+import { generateReferenceCode } from './utils/referenceCode';
 
 
 dotenv.config();
@@ -58,6 +61,39 @@ const runSchemaMigrations = async () => {
     if (accountRename.modifiedCount > 0) {
       console.log(`Migrated ${accountRename.modifiedCount} staff account(s): username -> email`);
     }
+
+    const missingReferences = await mongoose.connection
+      .collection("bookings")
+      .find({ $or: [{ referenceCode: { $exists: false } }, { referenceCode: null }, { referenceCode: "" }] }, { projection: { _id: 1 } })
+      .toArray();
+    for (const booking of missingReferences) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await mongoose.connection
+            .collection("bookings")
+            .updateOne({ _id: booking._id, $or: [{ referenceCode: { $exists: false } }, { referenceCode: null }, { referenceCode: "" }] }, { $set: { referenceCode: generateReferenceCode() } });
+          break;
+        } catch (error) {
+          if ((error as { code?: number }).code !== 11000) throw error;
+        }
+      }
+    }
+    if (missingReferences.length > 0) {
+      console.log(`Assigned reservation reference codes to ${missingReferences.length} booking(s)`);
+    }
+
+    const legacySystems = await mongoose.connection
+      .collection("systems")
+      .find({ gracePeriodMinutes: { $exists: false } })
+      .toArray();
+    for (const system of legacySystems) {
+      const hours = Number(system.gracePeriodHours);
+      const minutes = Number.isFinite(hours) && hours > 0 ? Math.min(1440, Math.max(1, Math.round(hours * 60))) : 120;
+      await mongoose.connection
+        .collection("systems")
+        .updateOne({ _id: system._id }, { $set: { gracePeriodMinutes: minutes } });
+      console.log(`Migrated grace period to ${minutes} minute(s)`);
+    }
   } catch (error) {
     console.log("Schema migration error: " + (error as Error).message);
   }
@@ -67,6 +103,15 @@ mongoose.connect(mongodb_uri)
   .then(async () => {
     console.log("Connected to MongoDB");
     await runSchemaMigrations();
+    try {
+      const recovered = await BackupService.recoverInterrupted();
+      if (recovered > 0) {
+        console.log(`Marked ${recovered} interrupted backup(s) as failed`);
+      }
+    } catch (error) {
+      console.log("Backup recovery error: " + (error as Error).message);
+    }
+    ReservationMonitor.start();
   })
   .catch((error) => {
     console.log("MongoDB connection failed: " + (error as Error).message);

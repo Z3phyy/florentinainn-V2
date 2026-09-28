@@ -89,6 +89,48 @@ export class AdminService {
     });
   }
 
+  static async suspend(id: string, reason: string, byName: string) {
+    await AdminModel.findByIdAndUpdate(id, {
+      isSuspended: true,
+      suspensionReason: reason || "",
+      suspendedBy: byName,
+      suspendedAt: new Date(),
+      $inc: { sessionVersion: 1 },
+    });
+  }
+
+  static async unsuspend(id: string) {
+    await AdminModel.findByIdAndUpdate(id, {
+      isSuspended: false,
+      suspensionReason: "",
+      suspendedBy: "",
+      suspendedAt: null,
+    });
+  }
+
+  static async deactivate(id: string, byName: string) {
+    await AdminModel.findByIdAndUpdate(id, {
+      isActive: false,
+      isSuspended: false,
+      suspensionReason: "",
+      deactivatedAt: new Date(),
+      deactivatedBy: byName,
+      $inc: { sessionVersion: 1 },
+    });
+  }
+
+  static async reactivate(id: string) {
+    await AdminModel.findByIdAndUpdate(id, {
+      isActive: true,
+      deactivatedAt: null,
+      deactivatedBy: "",
+    });
+  }
+
+  static async delete(id: string) {
+    return AdminModel.findByIdAndDelete(id);
+  }
+
   static async getAllAdmins() {
     const admins = AdminModel.find().select("-password -otp -otpExpiresAt -otpAttempts");
     return admins;
