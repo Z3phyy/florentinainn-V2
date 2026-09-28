@@ -348,6 +348,11 @@ export function ReservationHistoryView() {
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
                     <p className="font-semibold">{peso(item.billTotal)}</p>
+                    {(item.addOnsTotal || 0) > 0 ? (
+                      <p className="text-[11px] text-muted-foreground" title={(item.addOns || []).map((a) => `${a.quantity}× ${a.name}`).join(", ")}>
+                        incl. add-ons {peso(item.addOnsTotal || 0)}
+                      </p>
+                    ) : null}
                     <p className="text-[11px] text-muted-foreground">Paid {peso(item.amountPaid)}</p>
                     {item.balance > 0 && !["canceled", "no-show"].includes(item.status) ? (
                       <p className="text-[11px] text-amber-700">Due {peso(item.balance)}</p>

@@ -62,6 +62,7 @@ interface ReceiptSnapshot {
   roomPrice: number;
   nights: number;
   discount: number;
+  addOns: { name: string; quantity: number; subtotal: number }[];
   downPayment: number;
   totalBill: number;
   balanceDue: number;
@@ -103,7 +104,8 @@ export function CheckoutModal({ booking }: Props) {
   const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
 
   // Full bill with discount applied (deposit / prior payments tracked separately)
-  const totalBill = Math.max(0, Math.round(discountedPrice * nights));
+  const addOnsTotal = Math.max(0, booking.addOnsTotal || 0);
+  const totalBill = Math.max(0, Math.round(discountedPrice * nights) + addOnsTotal);
 
   // Amount already paid toward this stay (online reservation deposit, prior partials)
   const alreadyPaid = Math.max(0, booking.paymentAmount || 0);
@@ -174,6 +176,7 @@ export function CheckoutModal({ booking }: Props) {
         roomPrice: room.price,
         nights,
         discount: room.discount || 0,
+        addOns: (booking.addOns || []).map((a) => ({ name: a.name, quantity: a.quantity, subtotal: a.subtotal })),
         downPayment: Number.isFinite(serverPrevious) ? serverPrevious : alreadyPaid,
         totalBill: Number.isFinite(serverTotal) ? serverTotal : totalBill,
         balanceDue: Number.isFinite(serverTotal) && Number.isFinite(serverPrevious)
@@ -252,6 +255,14 @@ export function CheckoutModal({ booking }: Props) {
           (snapshot.discount / 100)
         ),
         tone: "credit",
+      });
+    }
+
+    for (const addOn of snapshot.addOns) {
+      lines.push({
+        label: `Add-on: ${addOn.quantity}× ${addOn.name}`,
+        value: addOn.subtotal,
+        tone: "muted",
       });
     }
 
@@ -450,6 +461,16 @@ export function CheckoutModal({ booking }: Props) {
                       </span>
                     </div>
                   )}
+
+                  {(booking.addOns || []).map((addOn, index) => (
+                    <div key={`${addOn.name}-${index}`} className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Add-on: {addOn.quantity}× {addOn.name}
+                        {addOn.pricingUnit === "per_night" ? ` × ${addOn.nights} night${addOn.nights === 1 ? "" : "s"}` : ""}
+                      </span>
+                      <span className="font-medium">{formatCurrency(addOn.subtotal)}</span>
+                    </div>
+                  ))}
 
                   {alreadyPaid > 0 && (
                     <div className="flex justify-between text-blue-600 dark:text-blue-400 font-medium">

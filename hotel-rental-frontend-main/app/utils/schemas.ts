@@ -166,7 +166,12 @@ export const systemSettingsSchema = z.object({
     .refine((v) => v === "" || /^https?:\/\/\S+\.\S+/i.test(v), "Enter a full URL starting with http:// or https://"),
   contactEmail: optionalEmailSchema,
   paymentMin: nonNegativeNumberString("Minimum payment", 1000000),
-  gracePeriodHours: nonNegativeNumberString("Grace period", 72),
+  gracePeriodMinutes: z
+    .string()
+    .trim()
+    .min(1, "Grace period is required.")
+    .refine((v) => Number.isInteger(Number(v)), "Use whole minutes.")
+    .refine((v) => Number(v) >= 1 && Number(v) <= 1440, "Grace period must be between 1 and 1440 minutes (24 hours)."),
   description: optionalText("Description", 1000),
   systemInfo: optionalText("Knowledge base", 20000),
 });
@@ -249,3 +254,82 @@ export const guestRecordSchema = z
     path: ["phone"],
     message: "Provide at least one contact detail — an email address or a contact number.",
   });
+
+export const ROOM_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
+export const ROOM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+const positiveNumberString = (label: string, max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1, `${label} is required.`)
+    .refine((v) => Number.isFinite(Number(v)), `${label} must be a number.`)
+    .refine((v) => Number(v) > 0, `${label} must be greater than 0.`)
+    .refine((v) => Number(v) <= max, `${label} must be at most ${max.toLocaleString()}.`);
+
+export const roomCreateSchema = z.object({
+  roomNumber: z
+    .string()
+    .trim()
+    .max(20, "Room number must be at most 20 characters.")
+    .refine((v) => v === "" || /^[A-Za-z0-9][A-Za-z0-9 -]*$/.test(v), "Room number may only contain letters, numbers, spaces, and hyphens."),
+  category: requiredText("Category", 50),
+  price: positiveNumberString("Price", 1000000),
+  status: z.string().refine((v) => v === "available" || v === "maintenance", "Status is required."),
+  bedding: z.string(),
+  maxHead: z
+    .string()
+    .trim()
+    .min(1, "Max guests is required.")
+    .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 20, "Max guests must be a whole number from 1 to 20."),
+  description: z
+    .string()
+    .trim()
+    .min(1, "Description is required.")
+    .min(10, "Description must be at least 10 characters.")
+    .max(1000, "Description must be at most 1000 characters."),
+  image: z.custom<File | null>().superRefine((file, ctx) => {
+    if (!file || typeof File === "undefined" || !(file instanceof File)) {
+      ctx.addIssue({ code: "custom", message: "Room image is required." });
+      return;
+    }
+    if (!ROOM_IMAGE_TYPES.includes(file.type)) {
+      ctx.addIssue({ code: "custom", message: "Room image must be a JPG, PNG, WebP, GIF, or AVIF file." });
+    } else if (file.size > ROOM_IMAGE_MAX_BYTES) {
+      ctx.addIssue({ code: "custom", message: "Room image must be 10 MB or smaller." });
+    }
+  }),
+  amenities: z.array(z.string()).max(30, "At most 30 amenities."),
+});
+
+export const addOnFormSchema = z.object({
+  name: requiredText("Name", 60),
+  description: optionalText("Description", 300),
+  price: z
+    .string()
+    .trim()
+    .min(1, "Price is required.")
+    .refine((v) => Number.isFinite(Number(v)) && Number(v) >= 0, "Price must be 0 or more.")
+    .refine((v) => Number(v) <= 1000000, "Price must be at most 1,000,000."),
+  pricingUnit: z.enum(["per_stay", "per_night"], { message: "Choose how this add-on is charged." }),
+  maxPerBooking: z
+    .string()
+    .trim()
+    .min(1, "Maximum per booking is required.")
+    .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 100, "Use a whole number from 1 to 100."),
+  stock: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 100000), "Leave empty for unlimited, or enter a whole number."),
+  isActive: z.boolean(),
+});
+
+export const reviewSchema = z.object({
+  rating: z.number().int().min(1, "Please choose a rating.").max(5, "Rating must be between 1 and 5."),
+  comment: z
+    .string()
+    .trim()
+    .min(1, "Please write a short review.")
+    .min(10, "Please write at least 10 characters about your stay.")
+    .max(1000, "Reviews can be at most 1000 characters."),
+});

@@ -3,6 +3,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
+import useAvailableAddOns from "@/app/hooks/useAvailableAddOns";
+import { AddOnQuantities, addOnLineTotal, addOnsEstimate, peso, toSelection } from "@/app/utils/addOnPricing";
+import { AddOnSelector } from "@/components/ui/addOnSelector";
 import { roomInterface } from "@/app/types/room.type";
 import { errorAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
@@ -86,6 +89,7 @@ export function CheckinModal({
   );
   const [guests, setGuests] = useState("1");
   const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [addOnQuantities, setAddOnQuantities] = useState<AddOnQuantities>({});
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitted, setSubmitted] = useState(false);
 
@@ -102,6 +106,7 @@ export function CheckinModal({
       setErrors({});
       setSubmitted(false);
       setPolicyAccepted(false);
+      setAddOnQuantities({});
       setIsSubmitting(false);
       submitLock.current = false;
     }
@@ -145,8 +150,13 @@ export function CheckinModal({
   const nightlyRate = Math.round(
     selectedRoom.price * (1 - (selectedRoom.discount || 0) / 100),
   );
-  const estimatedTotal = nights > 0 ? nightlyRate * nights : 0;
-  const depositDue = Number(systemInfo?.paymentMin || 0);
+  const roomSubtotal = nights > 0 ? nightlyRate * nights : 0;
+  const addOnsQuery = useAvailableAddOns(arrivalDate, departureDate, open);
+  const addOnOptions = addOnsQuery.data ?? [];
+  const addOnsTotal = nights > 0 ? addOnsEstimate(addOnOptions, addOnQuantities, nights) : 0;
+  const estimatedTotal = roomSubtotal + addOnsTotal;
+  const configuredDeposit = Number(systemInfo?.paymentMin || 0);
+  const depositDue = configuredDeposit > 0 ? Math.min(configuredDeposit, estimatedTotal) : 0;
 
   const handleDateChange = (newDate: string) => {
     setArivalDate(newDate);
@@ -180,6 +190,7 @@ export function CheckinModal({
       guests: number;
       policyAccepted: boolean;
       room: string;
+      addOns: { addOnId: string; quantity: number }[];
     }) => axiosInstance.post("/booking/reservation", data),
     onSuccess: (response) => {
       const bookingId = response.data?.bookingId;
@@ -199,7 +210,14 @@ export function CheckinModal({
         }
       } catch {}
 
-      const amount = systemInfo?.paymentMin?.toString() || "1000";
+      const serverDeposit = Number(response.data?.pricing?.depositDue);
+      if (!Number.isFinite(serverDeposit) || serverDeposit <= 0) {
+        errorAlert("Could not determine the amount due. Please try again.");
+        setIsSubmitting(false);
+        submitLock.current = false;
+        return;
+      }
+      const amount = String(Math.round(serverDeposit));
       if (paymentMode === "stripe") {
         stripeBooking(amount, bookingId);
       } else {
@@ -273,6 +291,7 @@ export function CheckinModal({
       guests: Number(guests),
       policyAccepted: true,
       room: selectedRoom._id,
+      addOns: toSelection(addOnQuantities),
     });
   };
 
@@ -546,6 +565,21 @@ export function CheckinModal({
             </div>
           </div>
 
+          <div className="space-y-2.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-[#5C454B] dark:text-gray-300">
+              Add-ons &amp; Special Requests
+            </Label>
+            <AddOnSelector
+              options={addOnOptions}
+              value={addOnQuantities}
+              onChange={setAddOnQuantities}
+              nights={Math.max(1, nights)}
+              isLoading={addOnsQuery.isLoading && nights > 0}
+              isError={addOnsQuery.isError}
+              disabled={isSubmitting}
+            />
+          </div>
+
           {/* Stay cost summary */}
           {nights > 0 && (
             <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-[#FAF5F5] dark:bg-[#25121B] p-4 space-y-1.5 text-xs">
@@ -555,16 +589,36 @@ export function CheckinModal({
                   {nights === 1 ? "" : "s"}
                 </span>
                 <span className="font-bold text-[#130005] dark:text-white">
-                  ₱{estimatedTotal.toLocaleString()}
+                  ₱{roomSubtotal.toLocaleString()}
                 </span>
               </div>
+              {addOnOptions
+                .filter((addOn) => (addOnQuantities[addOn._id] || 0) > 0)
+                .map((addOn) => (
+                  <div key={addOn._id} className="flex items-center justify-between">
+                    <span className="text-[#5C454B] dark:text-gray-400">
+                      {addOnQuantities[addOn._id]}× {addOn.name}
+                      {addOn.pricingUnit === "per_night" ? ` × ${nights} night${nights === 1 ? "" : "s"}` : ""}
+                    </span>
+                    <span className="font-semibold text-[#130005] dark:text-white">
+                      {peso(addOnLineTotal(addOn, addOnQuantities[addOn._id] || 0, nights))}
+                    </span>
+                  </div>
+                ))}
+              <div className="flex items-center justify-between border-t border-[#D9C3C3] dark:border-white/10 pt-1.5">
+                <span className="font-semibold text-[#130005] dark:text-white">Estimated stay total</span>
+                <span className="font-bold text-[#130005] dark:text-white">{peso(estimatedTotal)}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Final prices are confirmed by the hotel system when you continue. The balance is settled at the front desk.
+              </p>
               {depositDue > 0 && (
                 <div className="flex items-center justify-between border-t border-[#D9C3C3] dark:border-white/10 pt-1.5">
                   <span className="text-[#5C454B] dark:text-gray-400">
                     Non-refundable amount due now
                   </span>
                   <span className="font-bold text-[#900546] dark:text-[#F968AC]">
-                    ₱{depositDue.toLocaleString()}
+                    {peso(depositDue)}
                   </span>
                 </div>
               )}

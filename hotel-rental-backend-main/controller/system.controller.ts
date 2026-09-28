@@ -30,6 +30,7 @@ import {
 import { AccessCodeService } from "../services/accessCode.service";
 import { LoginAttemptService } from "../services/loginAttempt.service";
 import { EMAIL_POLICY } from "../config/loginPolicy";
+import { ReservationMonitor, resolveGraceMinutes } from "../services/reservationMonitor.service";
 
 // Escape user-supplied text so it is treated as a literal string, not a regex
 // pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
@@ -529,16 +530,29 @@ export class SystemController {
 
    static updateSystemInfo = async (request: AuthRequest, response: Response) => {
     try {
-      const { systemInfo, paymentMin, gracePeriodHours, systemName, header, description, facebook, contactEmail } = request.body
+      const { systemInfo, paymentMin, gracePeriodHours, gracePeriodMinutes, systemName, header, description, facebook, contactEmail } = request.body
 
       const updateData: any = { systemInfo, systemName, header, description, facebook, contactEmail };
       const sanitizedPaymentMin = Number(paymentMin);
       if (Number.isFinite(sanitizedPaymentMin) && sanitizedPaymentMin >= 0) {
         updateData.paymentMin = sanitizedPaymentMin;
       }
-      const sanitizedGracePeriod = Number(gracePeriodHours);
-      if (Number.isFinite(sanitizedGracePeriod) && sanitizedGracePeriod >= 0) {
-        updateData.gracePeriodHours = sanitizedGracePeriod;
+      if (gracePeriodMinutes !== undefined && gracePeriodMinutes !== null && gracePeriodMinutes !== "") {
+        const minutes = Number(gracePeriodMinutes);
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+          response.status(400).send("Grace period must be a whole number of minutes between 1 and 1440 (24 hours).")
+          return
+        }
+        updateData.gracePeriodMinutes = minutes;
+        updateData.gracePeriodHours = Math.round((minutes / 60) * 100) / 100;
+      } else if (gracePeriodHours !== undefined && gracePeriodHours !== null && gracePeriodHours !== "") {
+        const hours = Number(gracePeriodHours);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+          response.status(400).send("Grace period must be greater than 0 and at most 24 hours.")
+          return
+        }
+        updateData.gracePeriodHours = hours;
+        updateData.gracePeriodMinutes = Math.min(1440, Math.max(1, Math.round(hours * 60)));
       }
 
       const system = await SystemService.update(updateData)
@@ -1322,9 +1336,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
 
   static getStaffNotifications = async (request: AuthRequest, response: Response) => {
     try {
-      await SystemController.generateArrivalReminders();
-      await SystemController.generateGracePeriodReminders();
-      await SystemController.generateOverdueReminders();
+      await ReservationMonitor.run();
 
       const permissions = request.account?.permisions || [];
       const prefs = request.account?.notificationPrefs;
@@ -1519,140 +1531,6 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
       response.send({ success: true, deletedCount: result.deletedCount });
     } catch (error) {
       response.status(500).send("Failed to clear staff notifications: " + (error as Error).message);
-    }
-  };
-
-  private static generateArrivalReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const bookings = await BookingService.getTodayArrivals(todayStr);
-      const seen = new Set<string>();
-
-      for (const booking of bookings) {
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(
-          bookingId,
-          "reservation",
-          "Arrival Today"
-        );
-        if (existing) {
-          await BookingService.markArrivalNotified(bookingId);
-          continue;
-        }
-
-        // Duplicate bookings for the same guest (same phone/name, same date & time)
-        // must produce only ONE "Arrival Today" alert.
-        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${todayStr}|${booking.arrivalTime}`;
-        if (seen.has(guestKey)) {
-          await BookingService.markArrivalNotified(bookingId);
-          continue;
-        }
-        seen.add(guestKey);
-
-        if (!(await BookingService.claimArrivalNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.arrivalToday(booking),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate arrival reminders: " + (error as Error).message);
-    }
-  };
-
-  private static generateOverdueReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const bookings = await BookingService.getOverdueReservations(todayStr);
-      const seen = new Set<string>();
-
-      for (const booking of bookings) {
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(
-          bookingId,
-          "reservation",
-          "Overdue Arrival"
-        );
-        if (existing) {
-          await BookingService.markOverdueNotified(bookingId);
-          continue;
-        }
-
-        const guestKey = `${booking.clientPhone || booking.clientName || ""}|${booking.arrivalDate}|${booking.arrivalTime}`;
-        if (seen.has(guestKey)) {
-          await BookingService.markOverdueNotified(bookingId);
-          continue;
-        }
-        seen.add(guestKey);
-
-        if (!(await BookingService.claimOverdueNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.overdueArrival(booking),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate overdue reminders: " + (error as Error).message);
-    }
-  };
-
-  // Raises ONE alert per booking when today's arrival time has passed and the
-  // guest is now inside the grace window (mirrors the reservation page timer).
-  private static generateGracePeriodReminders = async () => {
-    try {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
-      const todayStr = `${yyyy}-${mm}-${dd}`;
-
-      const system = await SystemService.get();
-      const graceHours = system?.gracePeriodHours ?? 2;
-
-      const bookings = await BookingService.getTodayGraceCandidates(todayStr);
-
-      for (const booking of bookings) {
-        const [hours, minutes] = (booking.arrivalTime || "14:00").split(":").map(Number);
-        const arrivalMs = new Date(booking.arrivalDate).setHours(hours || 14, minutes || 0, 0, 0);
-        const deadlineMs = arrivalMs + graceHours * 60 * 60 * 1000;
-        const nowMs = now.getTime();
-
-        if (nowMs < arrivalMs || nowMs >= deadlineMs) continue;
-
-        const bookingId = String(booking._id);
-        const existing = await NotificationService.existsByDedupeKey(bookingId, "reservation", "Grace Period");
-        if (existing) {
-          await BookingService.markGraceNotified(bookingId);
-          continue;
-        }
-
-        if (!(await BookingService.claimGraceNotification(bookingId))) continue;
-
-        await notify({
-          ...notificationTemplates.gracePeriod(
-            booking,
-            graceHours,
-          ),
-          targetType: "booking",
-          targetId: bookingId,
-        });
-      }
-    } catch (error) {
-      console.log("Failed to generate grace period reminders: " + (error as Error).message);
     }
   };
 }

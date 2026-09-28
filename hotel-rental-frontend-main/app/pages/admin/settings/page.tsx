@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
@@ -22,14 +22,28 @@ import { SystemImageUploadModal } from "@/components/ui/systemImageUploadModal";
 import { AdminAccounts } from "./components/adminAccounts";
 import { BackupRestore } from "./components/backupRestore";
 import { AccessCodeSettings } from "./components/accessCodeSettings";
+import { AddOnManager } from "./components/addOnManager";
 import { Loader2, Save, Building2, Sparkles, Layout } from "lucide-react";
 
 type SettingsValues = z.input<typeof systemSettingsSchema>;
 
+const GRACE_PRESETS = [15, 30, 45, 60, 90, 120];
+
+const formatGrace = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h} hr`;
+  return `${m} min`;
+};
+
 const toFormValues = (info?: systemInterface): SettingsValues => ({
   systemInfo: info?.systemInfo || "",
   paymentMin: info?.paymentMin?.toString() || "0",
-  gracePeriodHours: info?.gracePeriodHours?.toString() || "2",
+  gracePeriodMinutes: String(
+    info?.gracePeriodMinutes ??
+      (info?.gracePeriodHours ? Math.round(info.gracePeriodHours * 60) : 120),
+  ),
   systemName: info?.systemName || "",
   header: info?.header || "",
   description: info?.description || "",
@@ -53,6 +67,8 @@ export default function Page() {
     register,
     handleSubmit,
     reset,
+    setValue,
+    control,
     formState: { errors, isDirty },
   } = useForm<SettingsValues>({
     resolver: zodResolver(systemSettingsSchema),
@@ -70,7 +86,7 @@ export default function Page() {
     mutationFn: (data: {
       systemInfo: string;
       paymentMin: number;
-      gracePeriodHours: number;
+      gracePeriodMinutes: number;
       systemName: string;
       header: string;
       description: string;
@@ -91,11 +107,12 @@ export default function Page() {
     updateMutation.mutate({
       ...parsed,
       paymentMin: Number(parsed.paymentMin),
-      gracePeriodHours: Number(parsed.gracePeriodHours),
+      gracePeriodMinutes: Number(parsed.gracePeriodMinutes),
     });
   });
 
   const hasChanges = isDirty;
+  const graceValue = useWatch({ control, name: "gracePeriodMinutes" });
   const inputCls = "mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs font-medium";
 
   return (
@@ -317,23 +334,40 @@ export default function Page() {
                   </div>
 
                   <div>
-                    <Label htmlFor="gracePeriodHours" className="text-xs font-bold text-[#130005] dark:text-white">
-                      Reservation Grace Period (hours) <RequiredMark />
+                    <Label htmlFor="gracePeriodMinutes" className="text-xs font-bold text-[#130005] dark:text-white">
+                      Reservation Grace Period (minutes) <RequiredMark />
                     </Label>
                     <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
-                      How long a guest can arrive late (past the expected arrival time) before the reservation is marked OVERDUE and an overdue alert is sent. Defaults to 2.
+                      Starts at the guest&apos;s expected arrival time. When it ends without a check-in, the reservation becomes OVERDUE. Staff and admins are notified at both points.
                     </p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {GRACE_PRESETS.map((minutes) => (
+                        <button
+                          key={minutes}
+                          type="button"
+                          onClick={() => setValue("gracePeriodMinutes", String(minutes), { shouldDirty: true, shouldValidate: true })}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                            graceValue === String(minutes)
+                              ? "border-[#900546] bg-[#900546] text-white"
+                              : "border-[#D9C3C3] text-[#5C454B] hover:border-[#900546]/50"
+                          }`}
+                        >
+                          {formatGrace(minutes)}
+                        </button>
+                      ))}
+                    </div>
                     <Input
-                      id="gracePeriodHours"
+                      id="gracePeriodMinutes"
                       type="number"
-                      min={0}
-                      step={0.5}
-                      placeholder="2"
+                      min={1}
+                      max={1440}
+                      step={1}
+                      placeholder="30"
                       className={inputCls}
-                      aria-invalid={!!errors.gracePeriodHours}
-                      {...register("gracePeriodHours")}
+                      aria-invalid={!!errors.gracePeriodMinutes}
+                      {...register("gracePeriodMinutes")}
                     />
-                    <FieldError message={errors.gracePeriodHours?.message} />
+                    <FieldError message={errors.gracePeriodMinutes?.message} />
                   </div>
 
                   <div>
@@ -393,6 +427,8 @@ export default function Page() {
             </form>
 
             <AccessCodeSettings />
+
+            <AddOnManager />
 
            {(user?.type === "super admin" || user?.type === "admin") && (
   <>

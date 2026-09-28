@@ -61,6 +61,13 @@ import {
 import { getBrand, getLogoDataUrl } from "@/app/utils/brand";
 import { downloadReceiptPdf, toSafeFilename } from "@/app/utils/receiptPdf";
 import {
+  HOTEL_TIME_ZONE,
+  formatHotelDate,
+  formatHotelDateTime,
+  formatHotelTime,
+  hotelDateKey,
+} from "@/app/utils/hotelTime";
+import {
   buildReceiptHtml,
   RECEIPT_STYLES,
   ReceiptData,
@@ -97,15 +104,13 @@ function resolvePaymentMethod(p: paymentInterface): {
   return { type: "cash", label: "Cash" };
 }
 
-function formatDate(dateStr: string) {
-  if (!dateStr) return "\u2014";
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("en-PH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+function paymentTimestamp(payment: paymentInterface): string {
+  return payment.createdAt || payment.date;
+}
+
+function paymentTimeMs(payment: paymentInterface): number {
+  const ms = new Date(paymentTimestamp(payment)).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
 }
 
 function formatCurrency(amount: number) {
@@ -183,12 +188,15 @@ export default function Page() {
       folioNo: payment.folio || "—",
       guestName: payment.paymentBy || "Guest",
       receivedBy: payment.receivedBy || "Front Desk",
-      dateLabel: formatDate(payment.date),
+      dateLabel: payment.createdAt
+        ? formatHotelDateTime(payment.createdAt)
+        : formatHotelDate(payment.date),
       methodLabel: resolvePaymentMethod(payment).label,
       amount: Number(payment.amount || 0),
       balance: Number(payment.balance || 0),
       status: payment.status === "refunded" ? "refunded" : "paid",
       issuedAt: new Date().toLocaleString("en-PH", {
+        timeZone: HOTEL_TIME_ZONE,
         year: "numeric",
         month: "short",
         day: "numeric",
@@ -240,14 +248,13 @@ export default function Page() {
   // Filtered & Sorted Payments
   const filteredPayments = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = hotelDateKey(now);
 
     // One week ago timestamp
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(now.getDate() - 7);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     // First day of current month
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfMonthStr = `${todayStr.slice(0, 7)}-01`;
 
     return payments
       .filter((p) => {
@@ -276,17 +283,15 @@ export default function Page() {
         }
 
         // 3. Date Presets & Custom Range
-        const paymentDate = new Date(p.date);
-        if (isNaN(paymentDate.getTime())) return true;
-
-        const pDateStr = p.date.split("T")[0];
+        const pDateStr = hotelDateKey(paymentTimestamp(p));
+        if (!pDateStr) return true;
 
         if (datePreset === "today") {
           if (pDateStr !== todayStr) return false;
         } else if (datePreset === "week") {
-          if (paymentDate < oneWeekAgo) return false;
+          if (paymentTimeMs(p) < oneWeekAgo.getTime()) return false;
         } else if (datePreset === "month") {
-          if (paymentDate < startOfMonth) return false;
+          if (pDateStr < startOfMonthStr) return false;
         } else if (datePreset === "custom") {
           if (startDate && pDateStr < startDate) return false;
           if (endDate && pDateStr > endDate) return false;
@@ -297,10 +302,10 @@ export default function Page() {
       .sort((a, b) => {
         // Sorting
         if (sortBy === "date-desc") {
-          return new Date(b.date).getTime() - new Date(a.date).getTime();
+          return paymentTimeMs(b) - paymentTimeMs(a);
         }
         if (sortBy === "date-asc") {
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          return paymentTimeMs(a) - paymentTimeMs(b);
         }
         if (sortBy === "amount-desc") {
           return b.amount - a.amount;
@@ -378,20 +383,12 @@ export default function Page() {
   const buildExportRows = () => {
     return filteredPayments.map((p) => {
       const resolved = resolvePaymentMethod(p);
-      const paymentDate = p.date ? new Date(p.date) : new Date();
-      const dateOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleDateString("en-PH", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          })
-        : "";
-      const timeOnly = !isNaN(paymentDate.getTime())
-        ? paymentDate.toLocaleTimeString("en-PH", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "";
+      const dateOnly = formatHotelDate(paymentTimestamp(p), {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const timeOnly = p.createdAt ? formatHotelTime(p.createdAt) : "";
 
       const refNo = p.refNumber || `RCP-${p._id.slice(-8).toUpperCase()}`;
       const folioNo = p.folio || "";
@@ -877,7 +874,12 @@ export default function Page() {
                     >
                       {/* Date */}
                       <TableCell className="text-xs font-medium whitespace-nowrap">
-                        {formatDate(payment.date)}
+                        {formatHotelDate(paymentTimestamp(payment))}
+                        {payment.createdAt ? (
+                          <span className="block text-[10px] font-normal text-muted-foreground">
+                            {formatHotelTime(payment.createdAt)}
+                          </span>
+                        ) : null}
                       </TableCell>
 
                       {/* Reference No. */}

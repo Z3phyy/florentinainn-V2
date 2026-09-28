@@ -33,6 +33,7 @@ import {
 import { RoomExteriorImage } from "./components/roomExteriorImage";
 import { RoomInteriorGallery } from "./components/roomInteriorGallery";
 import { CheckinModal } from "./components/checkinModal";
+import { RoomReviews } from "@/components/ui/roomReviews";
 import { GuestChatWidget } from "@/components/ui/guestChatWidget";
 import { FacebookIcon } from "@/components/ui/facebookIcon";
 
@@ -451,6 +452,10 @@ export default function RoomDetailPage() {
               </div>
             </div>
 
+          </div>
+
+          <div className="mt-12">
+            <RoomReviews roomId={room._id} />
           </div>
         </div>
       </main>

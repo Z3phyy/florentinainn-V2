@@ -2,6 +2,7 @@ export interface systemInterfaceInput {
     systemInfo: string,
     paymentMin: number,
     gracePeriodHours?: number,
+    gracePeriodMinutes?: number,
     logo: string,
     systemName: string,
     header: string,

@@ -158,68 +158,6 @@ export class BookingService {
     }
   }
 
-  static async getTodayArrivals(dateStr: string) {
-    return BookingsModel.find({
-      arrivalDate: dateStr,
-      status: { $in: ["reservation", "unpaid"] },
-      arrivalNotified: { $ne: true },
-    });
-  }
-
-  static async markArrivalNotified(id: string) {
-    await BookingsModel.findByIdAndUpdate(id, { arrivalNotified: true });
-  }
-
-  // Confirmed reservations whose arrival date has passed without a check-in;
-  // used to raise an overdue staff alert exactly once per booking.
-  static async getOverdueReservations(dateStr: string) {
-    return BookingsModel.find({
-      status: "reservation",
-      arrivalDate: { $lt: dateStr },
-      overdueNotified: { $ne: true },
-    });
-  }
-
-  static async markOverdueNotified(id: string) {
-    await BookingsModel.findByIdAndUpdate(id, { overdueNotified: true });
-  }
-
-  static async getTodayGraceCandidates(dateStr: string) {
-    return BookingsModel.find({
-      arrivalDate: dateStr,
-      status: "reservation",
-      graceNotified: { $ne: true },
-    });
-  }
-
-  static async markGraceNotified(id: string) {
-    await BookingsModel.findByIdAndUpdate(id, { graceNotified: true });
-  }
-
-  static async claimArrivalNotification(id: string): Promise<boolean> {
-    const claimed = await BookingsModel.findOneAndUpdate(
-      { _id: id, arrivalNotified: { $ne: true } },
-      { arrivalNotified: true },
-    );
-    return !!claimed;
-  }
-
-  static async claimOverdueNotification(id: string): Promise<boolean> {
-    const claimed = await BookingsModel.findOneAndUpdate(
-      { _id: id, overdueNotified: { $ne: true } },
-      { overdueNotified: true },
-    );
-    return !!claimed;
-  }
-
-  static async claimGraceNotification(id: string): Promise<boolean> {
-    const claimed = await BookingsModel.findOneAndUpdate(
-      { _id: id, graceNotified: { $ne: true } },
-      { graceNotified: true },
-    );
-    return !!claimed;
-  }
-
   // Aggregate all bookings into a guest directory keyed by guest identity.
   // A guest is identified by the strongest contact we have (email > phone > name).
   static async getGuestDirectory() {
@@ -264,7 +202,10 @@ export class BookingService {
       const nightlyRate = Math.round(
         (room?.price || 0) * (1 - (room?.discount || 0) / 100),
       );
-      const stayTotal = Math.round(nightlyRate * nights);
+      const stayTotal =
+        Number(booking.totalAmount) > 0
+          ? Number(booking.totalAmount)
+          : Math.round(nightlyRate * nights) + (Number(booking.addOnsTotal) || 0);
       const amountPaid = Number(booking.paymentAmount) || 0;
 
       guest.stays.push({
@@ -414,6 +355,7 @@ export class BookingService {
               { $gt: [{ $ifNull: ["$totalAmount", 0] }, 0] },
               "$totalAmount",
               {
+                $add: [{ $ifNull: ["$addOnsTotal", 0] }, {
                 $round: [
                   {
                     $multiply: [
@@ -438,6 +380,7 @@ export class BookingService {
                   },
                   0,
                 ],
+              }],
               },
             ],
           },
@@ -524,6 +467,9 @@ export class BookingService {
                 billTotal: 1,
                 balance: 1,
                 paymentStatus: 1,
+                addOns: 1,
+                addOnsTotal: 1,
+                billingAdjustments: 1,
                 createdAt: 1,
                 updatedAt: 1,
                 room: {

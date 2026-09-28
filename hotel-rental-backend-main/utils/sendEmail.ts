@@ -337,6 +337,9 @@ export interface ReservationVoucherEmailInput {
   arrivalTime?: string;
   departureDate?: string;
   refNumber?: string;
+  verificationCode?: string;
+  totalAmount?: number;
+  addOns?: { name: string; quantity: number; subtotal: number }[];
 }
 
 export const sendReservationVoucherEmail = async ({
@@ -350,7 +353,22 @@ export const sendReservationVoucherEmail = async ({
   arrivalTime,
   departureDate,
   refNumber,
+  verificationCode,
+  totalAmount,
+  addOns,
 }: ReservationVoucherEmailInput) => {
+  const peso = (value: number) =>
+    `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const escapeHtml = (value: string) =>
+    String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+  const addOnRows = (addOns || [])
+    .map(
+      (a) => `<tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Add-on: ${a.quantity}× ${escapeHtml(a.name)}</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${peso(a.subtotal)}</td>
+                  </tr>`,
+    )
+    .join("");
   const formatDate = (dateStr?: string) =>
     dateStr
       ? new Date(dateStr).toLocaleDateString("en-US", {
@@ -403,6 +421,23 @@ export const sendReservationVoucherEmail = async ({
                     <td style="padding:6px 12px; font-size:12px; color:#886F75;">Check-Out</td>
                     <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${formatDate(departureDate)}</td>
                   </tr>
+                  ${addOnRows}
+                  ${
+                    totalAmount
+                      ? `<tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Estimated Stay Total</td>
+                    <td style="padding:6px 12px; font-size:13px; font-weight:bold; color:#130005; text-align:right;">${peso(totalAmount)}</td>
+                  </tr>`
+                      : ""
+                  }
+                  ${
+                    verificationCode
+                      ? `<tr>
+                    <td style="padding:6px 12px; font-size:12px; color:#886F75;">Verification Code</td>
+                    <td style="padding:6px 12px; font-size:14px; font-weight:bold; color:#130005; text-align:right; font-family:monospace; letter-spacing:2px;">${escapeHtml(verificationCode)}</td>
+                  </tr>`
+                      : ""
+                  }
                   <tr>
                     <td style="padding:6px 12px; font-size:12px; color:#886F75;">Amount Paid</td>
                     <td style="padding:6px 12px; font-size:14px; font-weight:bold; color:#900546; text-align:right;">₱${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>

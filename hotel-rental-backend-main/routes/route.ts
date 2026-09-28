@@ -4,6 +4,8 @@ import roomRoute from "./room.route"
 import bookingRoute from "./booking.route"
 import systemRoute from "./system.route"
 import reportRoute from "./report.route"
+import addOnRoute from "./addOn.route"
+import reviewRoute from "./review.route"
 
 const routes = Router()
 
@@ -12,5 +14,7 @@ routes.use("/room", roomRoute)
 routes.use("/booking", bookingRoute)
 routes.use("/system", systemRoute)
 routes.use("/reports", reportRoute)
+routes.use("/addons", addOnRoute)
+routes.use("/review", reviewRoute)
 
 export default routes

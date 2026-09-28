@@ -1,3 +1,5 @@
+import { hotelDateStr, hotelDateTimeToUtc, daysBetweenDateStr } from "./hotelTime";
+
 export const MAX_STAY_NIGHTS = 30;
 export const MAX_ADVANCE_DAYS = 365;
 export const ARRIVAL_GRACE_MS = 5 * 60 * 1000;
@@ -101,6 +103,7 @@ export function validateStayDates(input: {
   arrivalTime: string;
   departureDate?: string;
   requireDeparture?: boolean;
+  allowPastArrival?: boolean;
 }): string | null {
   const { arrivalDate, arrivalTime, departureDate, requireDeparture } = input;
 
@@ -122,27 +125,22 @@ export function validateStayDates(input: {
     return "Invalid arrival date or time format";
   }
 
-  const arrivalDateTime = new Date(
-    arrival.getFullYear(),
-    arrival.getMonth(),
-    arrival.getDate(),
-    hours,
-    minutes,
-    0,
-    0,
-  );
+  const arrivalDateTime = hotelDateTimeToUtc(arrivalDate, arrivalTime);
+  if (!arrivalDateTime) {
+    return "Invalid arrival date or time format";
+  }
 
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayStr = hotelDateStr(now);
 
-  if (arrivalDateTime.getTime() < now.getTime() - ARRIVAL_GRACE_MS) {
-    if (arrival.getTime() < todayStart.getTime()) {
+  if (!input.allowPastArrival && arrivalDateTime.getTime() < now.getTime() - ARRIVAL_GRACE_MS) {
+    if (arrivalDate < todayStr) {
       return "Arrival date cannot be in the past";
     }
     return "Arrival time cannot be in the past for today's arrival";
   }
 
-  if (daysBetween(todayStart, arrival) > MAX_ADVANCE_DAYS) {
+  if (daysBetweenDateStr(todayStr, arrivalDate) > MAX_ADVANCE_DAYS) {
     return `Arrival date cannot be more than ${MAX_ADVANCE_DAYS} days ahead.`;
   }
 

@@ -7,6 +7,9 @@ import { BookingService } from "../services/booking.service";
 import { logAuditAction } from "../utils/auditLogger";
 import { notify } from "../utils/notification";
 import { NotificationService } from "../services/notification.service";
+import { validateRoomCreate } from "../utils/roomValidation";
+import RoomModel from "../model/room.model";
+import fs from "fs";
 
 
 // Helper to build a human-readable room label for audit logs & notifications
@@ -51,50 +54,69 @@ export class RoomController {
   }
 
   static createRoom = async (request: AuthRequest, response: Response) => {
+    const discardUpload = () => {
+      if (request.file?.path) {
+        fs.unlink(request.file.path, () => undefined);
+      }
+    };
     try {
+      const body = (request.body || {}) as Record<string, unknown>;
+      const imageUrlFromBody = typeof body.image === "string" ? body.image.trim() : "";
+      const file = request.file;
+      const hasImage = !!file || /^https:\/\/\S+$/i.test(imageUrlFromBody);
 
-
-      // Handle file upload for the 'image' field
-      let imageUrl = "";
-      if (request.file) {
-        imageUrl = await uploadToCloudinary(request.file.path);
+      const { errors, value } = validateRoomCreate(body, hasImage);
+      if (file && !/^image\/(jpeg|png|webp|gif|avif)$/i.test(file.mimetype)) {
+        errors.image = "Room image must be a JPG, PNG, WebP, GIF, or AVIF file.";
+      }
+      if (file && file.size > 10 * 1024 * 1024) {
+        errors.image = "Room image must be 10 MB or smaller.";
       }
 
-      // Build room data from form fields, converting stringified arrays
-      const parsedPrice = Number(request.body.price);
-      const parsedDiscount = Number(request.body.discount || 0);
-      const parsedMaxHead = Number(request.body.maxHead || 1);
-      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-        response.status(400).send("Invalid room price");
+      if (value.roomNumber && !errors.roomNumber) {
+        const escaped = value.roomNumber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const duplicate = await RoomModel.exists({ roomNumber: { $regex: `^${escaped}$`, $options: "i" } });
+        if (duplicate) errors.roomNumber = `Room ${value.roomNumber} already exists.`;
+      }
+
+      if (Object.keys(errors).length > 0) {
+        discardUpload();
+        response.status(400).json({
+          message: Object.values(errors)[0],
+          errors,
+        });
         return;
       }
-      if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0 || parsedDiscount > 100) {
-        response.status(400).send("Invalid discount (0-100)");
-        return;
-      }
-      if (!Number.isFinite(parsedMaxHead) || parsedMaxHead < 1) {
-        response.status(400).send("Invalid max occupancy");
-        return;
+
+      let imageUrl = imageUrlFromBody;
+      if (file) {
+        try {
+          imageUrl = await uploadToCloudinary(file.path);
+        } catch (uploadError) {
+          discardUpload();
+          console.log("Room image upload failed: " + (uploadError as Error).message);
+          response.status(502).json({
+            message: "The room image could not be uploaded. Please try again.",
+            errors: { image: "Image upload failed. Please try again." },
+          });
+          return;
+        }
       }
 
       const roomData: roomInterfaceInput = {
-        roomNumber: request.body.roomNumber || "",
-        category: request.body.category,
-        amenities: parseArrayField(request.body.amenities),
+        roomNumber: value.roomNumber,
+        category: value.category,
+        amenities: parseArrayField(request.body.amenities).map((a) => a.trim()).filter(Boolean).slice(0, 30),
         bedding: parseArrayField(request.body.bedding),
-        price: parsedPrice,
-        maxHead: parsedMaxHead,
-        discount: parsedDiscount,
-        image: imageUrl || request.body.image,
-        description: request.body.description,
-        images: typeof request.body.images === "string"
-          ? JSON.parse(request.body.images)
-          : request.body.images || [],
-        status: request.body.status,
+        price: value.price,
+        maxHead: value.maxHead,
+        discount: value.discount,
+        image: imageUrl,
+        description: value.description,
+        images: [],
+        status: value.status,
         maintenance: "",
-        housekeeping: typeof request.body.housekeeping === "string"
-          ? JSON.parse(request.body.housekeeping)
-          : request.body.housekeeping || [],
+        housekeeping: [],
       };
 
       await RoomService.create(roomData)
@@ -106,10 +128,11 @@ export class RoomController {
         targetType: "room",
       });
       const rooms = await RoomService.getAll()
-      response.send(rooms)
+      response.status(201).send(rooms)
     } catch (error) {
+      discardUpload();
       console.log("Failed to create room: " + (error as Error).message)
-      response.status(500).send("Failed to create room: " + (error as Error).message)
+      response.status(500).json({ message: "Failed to create room. Please try again." })
     }
   }
 

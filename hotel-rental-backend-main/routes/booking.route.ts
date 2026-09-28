@@ -6,6 +6,9 @@ import { paymentLimiter } from "../config/rateLimit";
 
 const route = Router()
 
+route.get("/reservations/board", authenticateJWT, requirePermission("reservation management"), BookingController.reservationBoard);
+route.get("/room-availability", authenticateJWT, requirePermission("reservation management"), BookingController.roomAvailability);
+route.post("/reservation/modify", authenticateJWT, requirePermission("reservation management"), BookingController.modifyReservation);
 route.get("/history", authenticateJWT, requirePermission("reservation history"), BookingController.reservationHistory);
 route.get("/directory", authenticateJWT, requirePermission("guest records"), BookingController.guestDirectory);
 route.put("/directory", authenticateJWT, requirePermission("guest records"), BookingController.updateGuestRecord);

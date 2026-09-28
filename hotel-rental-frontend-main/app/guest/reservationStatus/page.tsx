@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import { RoomReviewPanel } from "@/components/ui/roomReviewPanel";
 import {
   Search,
   Loader2,
@@ -69,11 +70,15 @@ export default function Page() {
   const [bookingId, setBookingId] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [result, setResult] = useState<LookupResult | null>(null);
+  const [lookedUp, setLookedUp] = useState<{ bookingId: string; code: string } | null>(null);
 
   const lookupMutation = useMutation({
     mutationFn: (data: { bookingId: string; verificationCode?: string }) =>
       axiosInstance.post("/booking/status/lookup", data).then((r) => r.data),
-    onSuccess: (data: LookupResult) => setResult(data),
+    onSuccess: (data: LookupResult, variables) => {
+      setResult(data);
+      setLookedUp({ bookingId: variables.bookingId, code: variables.verificationCode || "" });
+    },
   });
 
   const errorMessage =
@@ -251,6 +256,14 @@ export default function Page() {
                 <p className="text-[11px] text-[#5C454B] dark:text-gray-400 text-center">
                   This reservation is non-refundable once paid.
                 </p>
+              )}
+
+              {lookedUp && result.status === "completed" && (
+                <RoomReviewPanel
+                  key={`${lookedUp.bookingId}-${lookedUp.code}`}
+                  bookingId={lookedUp.bookingId}
+                  verificationCode={lookedUp.code}
+                />
               )}
             </div>
           )}

@@ -163,10 +163,6 @@ export class NotificationService {
     return NotificationModel.deleteMany({ read: true, createdAt: { $lt: cutoff } });
   }
 
-  static async existsByDedupeKey(targetId: string, type: string, title: string) {
-    return NotificationModel.exists({ targetId, type, title });
-  }
-
   static async delete(id: string) {
     return NotificationModel.findByIdAndDelete(id);
   }

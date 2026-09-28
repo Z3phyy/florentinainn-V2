@@ -31,3 +31,11 @@ export const aiLimiter = rateLimit({
   legacyHeaders: false,
   message: "Too many AI requests, please try again later.",
 });
+
+export const reviewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many review attempts, please try again later." },
+});

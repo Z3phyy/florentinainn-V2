@@ -9,6 +9,12 @@ import {
   isBookingType,
 } from "../types/bookings.type";
 import { BookingService } from "../services/booking.service";
+import { AddOnError, AddOnSelection, AddOnService, parseAddOnSelection } from "../services/addOn.service";
+import { runAtomic } from "../utils/transaction";
+import { ReservationError, ReservationService, ModificationInput } from "../services/reservation.service";
+import { AvailabilityService } from "../services/availability.service";
+import { arrivalTimeline, resolveGraceMinutes } from "../services/reservationMonitor.service";
+import RoomModel from "../model/room.model";
 import BookingsModel from "../model/bookings.model";
 import { RoomService } from "../services/room.service";
 import { Paymentservice } from "../services/payment.service";
@@ -18,6 +24,8 @@ import { notify } from "../utils/notification";
 import { verifyOnlinePayment } from "../utils/verifyPayment";
 import { sendReservationVoucherEmail } from "../utils/sendEmail";
 import { localDateStr } from "../utils/date";
+import { daysBetweenDateStr, hotelDateStr, isValidDateStr, HOTEL_TIME_ZONE } from "../utils/hotelTime";
+import { plannedNights, stayTotal } from "../utils/pricing";
 import {
   validateGuestName,
   validateAddress,
@@ -80,13 +88,64 @@ function validateGuestDetails(input: {
 
 // Helper to compute nights stayed so far from an arrival date string (YYYY-MM-DD)
 function nightsSince(arrivalDate: string): number {
-  const [year, month, day] = arrivalDate.split("-").map(Number);
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return 1;
-  const arrival = new Date(year, month - 1, day);
-  const now = new Date();
-  const diffMs = now.getTime() - arrival.getTime();
-  const diffDays = Math.floor(diffMs / 86400000);
-  return Math.max(1, diffDays);
+  return Math.max(1, daysBetweenDateStr(arrivalDate, hotelDateStr()));
+}
+
+async function createBookingWithAddOns(
+  data: bookingInterfaceInput,
+  selection: AddOnSelection[],
+  roomDoc: any,
+) {
+  return runAtomic(async (session) => {
+    if (session) {
+      await AddOnService.lock(selection.map((s) => s.addOnId), session);
+    }
+    const priced = await AddOnService.price(
+      selection,
+      { arrivalDate: data.arrivalDate, departureDate: data.departureDate },
+      { session },
+    );
+    const totals = stayTotal({
+      room: roomDoc,
+      nights: plannedNights(data.arrivalDate, data.departureDate),
+      addOnsTotal: priced.total,
+    });
+    const [created] = await BookingsModel.create(
+      [
+        {
+          ...data,
+          addOns: priced.items,
+          addOnsTotal: priced.total,
+          totalAmount: totals.total,
+        },
+      ],
+      { session },
+    );
+    return created;
+  });
+}
+
+async function reservationPricing(booking: any) {
+  const roomDoc = booking.room?.price !== undefined ? booking.room : await RoomService.get(String(booking.room));
+  const totals = stayTotal({
+    room: roomDoc,
+    nights: plannedNights(booking.arrivalDate, booking.departureDate),
+    addOnsTotal: Number(booking.addOnsTotal) || 0,
+  });
+  const system = await SystemService.get();
+  const paymentMin = Number(system?.paymentMin || 0);
+  return {
+    ...totals,
+    addOns: (booking.addOns || []).map((a: any) => ({
+      name: a.name,
+      quantity: a.quantity,
+      unitPrice: a.unitPrice,
+      pricingUnit: a.pricingUnit,
+      nights: a.nights,
+      subtotal: a.subtotal,
+    })),
+    depositDue: paymentMin > 0 ? Math.min(paymentMin, totals.total) : totals.total,
+  };
 }
 
 export class BookingController {
@@ -159,16 +218,60 @@ export class BookingController {
   static getBooking = async (request: AuthRequest, response: Response) => {
     try {
       const { id } = request.params;
-      const booking = await BookingService.get(id);
+      if (typeof id !== "string" || !/^[a-f\d]{24}$/i.test(id)) {
+        response.status(404).send("Booking not found");
+        return;
+      }
+      const booking: any = await BookingsModel.findById(id).populate("room").lean();
       if (!booking) {
         response.status(404).send("Booking not found");
         return;
       }
-      const publicBooking = { ...booking };
-      delete (publicBooking as Record<string, unknown>).clientAddress;
-      delete (publicBooking as Record<string, unknown>).clientEmail;
-      delete (publicBooking as Record<string, unknown>).clientPhone;
-      response.send(publicBooking);
+      const room = booking.room || {};
+      const plannedTotal = stayTotal({
+        room,
+        nights: plannedNights(booking.arrivalDate, booking.departureDate),
+        addOnsTotal: Number(booking.addOnsTotal) || 0,
+      });
+      response.send({
+        _id: String(booking._id),
+        clientName: booking.clientName,
+        type: booking.type,
+        status: booking.status,
+        guests: booking.guests,
+        arrivalDate: booking.arrivalDate,
+        arrivalTime: booking.arrivalTime,
+        departureDate: booking.departureDate || "",
+        paymentAmount: Number(booking.paymentAmount) || 0,
+        paymentMethod: booking.paymentMethod || "",
+        paymentRefNumber: booking.paymentRefNumber || "",
+        totalAmount: Number(booking.totalAmount) || plannedTotal.total,
+        roomSubtotal: plannedTotal.roomSubtotal,
+        nights: plannedTotal.nights,
+        addOns: (booking.addOns || []).map((a: any) => ({
+          name: a.name,
+          quantity: a.quantity,
+          unitPrice: a.unitPrice,
+          pricingUnit: a.pricingUnit,
+          nights: a.nights,
+          subtotal: a.subtotal,
+        })),
+        addOnsTotal: Number(booking.addOnsTotal) || 0,
+        nonRefundable: booking.nonRefundable === true,
+        checkedOutAt: booking.checkedOutAt || null,
+        room: {
+          _id: room._id ? String(room._id) : "",
+          roomNumber: room.roomNumber || "",
+          category: room.category || "",
+          price: room.price,
+          discount: room.discount,
+          image: room.image || "",
+          maxHead: room.maxHead,
+          amenities: room.amenities || [],
+          bedding: room.bedding || [],
+          description: room.description || "",
+        },
+      });
     } catch (error) {
       console.log("Failed to get booking: " + (error as Error).message);
       response.status(500).send("Failed to get booking");
@@ -386,6 +489,14 @@ export class BookingController {
         return;
       }
 
+      let addOnSelection;
+      try {
+        addOnSelection = parseAddOnSelection(request.body?.addOns);
+      } catch (error) {
+        response.status(400).send((error as Error).message);
+        return;
+      }
+
       const duplicate = await BookingService.findRecentDuplicate({
         room,
         clientName,
@@ -414,7 +525,16 @@ export class BookingController {
         room,
       };
 
-      const booking = await BookingService.create(bookingData);
+      let booking;
+      try {
+        booking = await createBookingWithAddOns(bookingData, addOnSelection, roomDoc);
+      } catch (error) {
+        if (error instanceof AddOnError) {
+          response.status(error.status).send(error.message);
+          return;
+        }
+        throw error;
+      }
       await BookingService.reconcileRoomStatus(room);
 
       await logAuditAction({
@@ -494,6 +614,20 @@ export class BookingController {
         ? String(existing.room._id)
         : String(existing.room ?? "");
       const newRoomId = room || currentRoomId;
+
+      if (
+        newRoomId !== currentRoomId ||
+        text(arrivalDate) !== existing.arrivalDate ||
+        text(arrivalTime) !== existing.arrivalTime ||
+        (departureDate && departureDate !== (existing.departureDate || ""))
+      ) {
+        response
+          .status(400)
+          .send(
+            "Room and date changes must use the reservation modification endpoint (POST /booking/reservation/modify) so availability and pricing are verified.",
+          );
+        return;
+      }
 
       let newRoomDoc: any = null;
       if (newRoomId !== currentRoomId) {
@@ -701,10 +835,12 @@ export class BookingController {
       const paymentBy = booking.clientName;
       const paymentMethod = text(method) || "Cash";
 
-      const discount = room.discount || 0;
-      const nightly = Math.round(room.price * (1 - discount / 100));
       const nights = nightsSince(booking.arrivalDate);
-      const totalAmount = Math.round(nightly * nights);
+      const totalAmount = stayTotal({
+        room,
+        nights,
+        addOnsTotal: Number((booking as any).addOnsTotal) || 0,
+      }).total;
 
       const previouslyPaid = Number(booking.paymentAmount) || 0;
       const balanceBefore = Math.max(0, totalAmount - previouslyPaid);
@@ -872,11 +1008,11 @@ export class BookingController {
       }
 
       const room = booking.room as any;
-      const discount = room.discount || 0;
-      const nightly = Math.round(room.price * (1 - discount / 100));
-      const totalAmount = Math.round(
-        nightly * nightsSince(booking.arrivalDate),
-      );
+      const totalAmount = stayTotal({
+        room,
+        nights: nightsSince(booking.arrivalDate),
+        addOnsTotal: Number((booking as any).addOnsTotal) || 0,
+      }).total;
 
       const alreadyPaid = Number(booking.paymentAmount) || 0;
       const remainingBalance = Math.max(0, totalAmount - alreadyPaid);
@@ -1044,13 +1180,25 @@ export class BookingController {
         return;
       }
 
+      let addOnSelection;
+      try {
+        addOnSelection = parseAddOnSelection(request.body?.addOns);
+      } catch (error) {
+        response.status(400).send((error as Error).message);
+        return;
+      }
+
       const duplicate = await BookingService.findRecentDuplicate({
         room,
         clientName,
         arrivalDate,
       });
       if (duplicate) {
-        response.send({ bookingId: duplicate._id, duplicate: true });
+        response.send({
+          bookingId: duplicate._id,
+          duplicate: true,
+          pricing: await reservationPricing(duplicate),
+        });
         return;
       }
 
@@ -1070,7 +1218,16 @@ export class BookingController {
         room,
       };
 
-      const booking = await BookingService.create(bookingData);
+      let booking;
+      try {
+        booking = await createBookingWithAddOns(bookingData, addOnSelection, roomDoc);
+      } catch (error) {
+        if (error instanceof AddOnError) {
+          response.status(error.status).send(error.message);
+          return;
+        }
+        throw error;
+      }
       const verificationCode = generateVerificationCode(String(booking._id));
       await BookingService.setVerificationCode(
         String(booking._id),
@@ -1094,6 +1251,7 @@ export class BookingController {
         bookingId: booking._id,
         verificationCode,
         nonRefundable: true,
+        pricing: await reservationPricing(booking),
       });
     } catch (error) {
       console.log("Failed to create reservation: " + (error as Error).message);
@@ -1182,7 +1340,14 @@ export class BookingController {
       }
 
       const systemDoc = await SystemService.get();
-      const minimumDeposit = Number(systemDoc?.paymentMin || 0);
+      const plannedBill = stayTotal({
+        room: booking.room as any,
+        nights: plannedNights(booking.arrivalDate, booking.departureDate),
+        addOnsTotal: Number((booking as any).addOnsTotal) || 0,
+      }).total;
+      const configuredMinimum = Number(systemDoc?.paymentMin || 0);
+      const minimumDeposit =
+        configuredMinimum > 0 ? Math.min(configuredMinimum, plannedBill) : 0;
       if (minimumDeposit > 0 && paidAmount < minimumDeposit) {
         response
           .status(400)
@@ -1322,7 +1487,9 @@ export class BookingController {
       // Email the guest their printable payment voucher so it can be reopened
       if (booking.clientEmail) {
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-        const voucherUrl = `${frontendUrl}/guest/clientPayment?bookingId=${bookingId}&amount=${paidAmount}&gateway=${effectiveGateway}`;
+        const voucherUrl = `${frontendUrl}/guest/clientPayment?bookingId=${bookingId}&amount=${paidAmount}&gateway=${effectiveGateway}${
+          booking.verificationCode ? `&code=${encodeURIComponent(booking.verificationCode)}` : ""
+        }`;
         const roomCategory =
           booking.room && typeof booking.room === "object"
             ? (booking.room as { category?: string }).category
@@ -1340,6 +1507,13 @@ export class BookingController {
             arrivalTime: booking.arrivalTime,
             departureDate: booking.departureDate,
             refNumber: generatedRef,
+            verificationCode: booking.verificationCode || undefined,
+            totalAmount: plannedBill,
+            addOns: ((booking as any).addOns || []).map((a: any) => ({
+              name: a.name,
+              quantity: a.quantity,
+              subtotal: a.subtotal,
+            })),
           });
         } catch (emailError) {
           console.log("Voucher email failed: " + (emailError as Error).message);
@@ -1580,175 +1754,220 @@ export class BookingController {
     request: AuthRequest,
     response: Response,
   ) => {
-    try {
-      const { bookingId, arrivalDate, arrivalTime, departureDate, note } =
-        request.body;
-
-      const booking = await BookingService.get(bookingId);
-      if (!booking) {
-        response.status(404).send("Booking not found");
-        return;
-      }
-
-      const validationError = validateArrivalDateTime(
-        text(arrivalDate),
-        text(arrivalTime),
-        text(departureDate),
-        true,
-      );
-      if (validationError) {
-        response.status(400).send(validationError);
-        return;
-      }
-
-      const account = request.account;
-      const changedBy = account?.name || "Staff";
-
-      await BookingService.update(bookingId, {
-        clientName: booking.clientName,
-        clientAddress: booking.clientAddress,
-        type: booking.type,
-        status: booking.status,
+    const { bookingId, arrivalDate, arrivalTime, departureDate, note } =
+      request.body || {};
+    await BookingController.applyModification(
+      request,
+      response,
+      String(bookingId || ""),
+      {
         arrivalDate: text(arrivalDate),
         arrivalTime: text(arrivalTime),
         departureDate: text(departureDate),
-        wasRescheduled: true,
-        room: booking.room?._id ? String(booking.room._id) : String(booking.room ?? ""),
-      });
+        note: text(note),
+        reason: "reschedule",
+      },
+      "RESERVATION_RESCHEDULED",
+    );
+  };
 
-      const history: any[] = [];
-      if (booking.arrivalDate !== text(arrivalDate)) {
-        history.push({
-          field: "arrivalDate",
-          from: booking.arrivalDate,
-          to: text(arrivalDate),
-          changedBy,
-          changedAt: new Date(),
-        });
-      }
-      if (booking.arrivalTime !== text(arrivalTime)) {
-        history.push({
-          field: "arrivalTime",
-          from: booking.arrivalTime,
-          to: text(arrivalTime),
-          changedBy,
-          changedAt: new Date(),
-        });
-      }
-      if ((booking.departureDate || "") !== text(departureDate)) {
-        history.push({
-          field: "departureDate",
-          from: booking.departureDate || "",
-          to: text(departureDate),
-          changedBy,
-          changedAt: new Date(),
-        });
-      }
-      for (const entry of history) {
-        await BookingService.recordModification(bookingId, {
-          ...entry,
-          note: note || "",
-        });
-      }
+  static extendStay = async (request: AuthRequest, response: Response) => {
+    const { bookingId, departureDate, note } = request.body || {};
+    if (!text(departureDate)) {
+      response.status(400).send("New departure date is required");
+      return;
+    }
+    await BookingController.applyModification(
+      request,
+      response,
+      String(bookingId || ""),
+      {
+        departureDate: text(departureDate),
+        note: text(note) ? `Stay extended: ${text(note)}` : "Stay extended",
+        reason: "extend_stay",
+      },
+      "STAY_EXTENDED",
+    );
+  };
 
-      const roomId = booking.room?._id
-        ? String(booking.room._id)
-        : String(booking.room ?? "");
-      await BookingService.reconcileRoomStatus(roomId);
+  static modifyReservation = async (request: AuthRequest, response: Response) => {
+    const body = request.body || {};
+    const input: ModificationInput = {
+      revision: body.revision !== undefined ? Number(body.revision) : undefined,
+      roomId: text(body.roomId) || undefined,
+      arrivalDate: text(body.arrivalDate) || undefined,
+      arrivalTime: text(body.arrivalTime) || undefined,
+      departureDate: body.departureDate !== undefined ? text(body.departureDate) : undefined,
+      guests: body.guests !== undefined && body.guests !== "" ? Number(body.guests) : undefined,
+      addOns: body.addOns,
+      note: text(body.note),
+    };
+    if (input.revision !== undefined && !Number.isInteger(input.revision)) {
+      response.status(400).json({ message: "Invalid revision" });
+      return;
+    }
+    if (input.guests !== undefined && !Number.isInteger(input.guests)) {
+      response.status(400).json({ message: "Guest count must be a whole number" });
+      return;
+    }
+    await BookingController.applyModification(
+      request,
+      response,
+      String(body.bookingId || ""),
+      input,
+      "RESERVATION_MODIFIED",
+      body.preview === true,
+    );
+  };
 
+  private static applyModification = async (
+    request: AuthRequest,
+    response: Response,
+    bookingId: string,
+    input: ModificationInput,
+    auditAction: string,
+    preview = false,
+  ) => {
+    const actor = {
+      name: request.account?.name || "Staff",
+      role: request.account?.type || "employee",
+    };
+    try {
+      const result: any = await ReservationService.modify(bookingId, input, actor, { preview });
+      if (preview) {
+        response.send(result);
+        return;
+      }
+      const booking = result.booking;
+      const changeText = result.changes
+        .map((c: any) => `${c.field}: ${c.from || "—"} → ${c.to || "—"}`)
+        .join("; ");
+      const paymentText =
+        result.payment.difference !== 0
+          ? ` Total ₱${result.payment.previousTotal} → ₱${result.payment.newTotal}; paid ₱${result.payment.amountPaid}; ${
+              result.payment.balanceDue > 0
+                ? `balance due ₱${result.payment.balanceDue}`
+                : result.payment.creditDue > 0
+                  ? `overpayment/credit ₱${result.payment.creditDue} (no refund issued automatically)`
+                  : "fully settled"
+            }.`
+          : "";
       await logAuditAction({
-        action: "RESERVATION_RESCHEDULED",
-        details: `Reservation ${bookingId} rescheduled by ${changedBy}: arrival ${booking.arrivalDate} (${booking.arrivalTime}) → ${text(arrivalDate)} (${text(arrivalTime)})${note ? ` · ${note}` : ""}`,
-        actorName: changedBy,
-        actorRole: account?.type || "employee",
+        action: auditAction,
+        details: `Booking ${bookingId} for ${booking.clientName} modified by ${actor.name}: ${changeText}.${paymentText}${input.note ? ` Note: ${input.note}` : ""}`,
+        actorName: actor.name,
+        actorRole: actor.role,
         targetType: "booking",
         targetId: bookingId,
       });
-
       await notify({
         type: "reservation",
-        title: `Reservation Rescheduled: ${booking.clientName}`,
-        message: `New arrival ${text(arrivalDate)} (${text(arrivalTime)})`,
-        severity: "info",
+        title: `Reservation Updated: ${booking.clientName}`,
+        message: `${changeText}${paymentText}`.slice(0, 400),
+        severity: result.payment.creditDue > 0 || result.payment.balanceDue > 0 ? "warning" : "info",
         link: "/pages/admin/dashboard",
         targetType: "booking",
         targetId: bookingId,
       });
-
-      response.send({ success: true });
+      const { booking: _omit, ...summary } = result;
+      response.send({ success: true, ...summary });
     } catch (error) {
-      console.log("Failed to reschedule booking: " + (error as Error).message);
-      response
-        .status(500)
-        .send("Failed to reschedule booking: " + (error as Error).message);
+      if (error instanceof ReservationError) {
+        response.status(error.status).json({ message: error.message, ...(error.details || {}) });
+        return;
+      }
+      console.log("Failed to modify booking: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to modify booking" });
     }
   };
 
-  static extendStay = async (request: AuthRequest, response: Response) => {
+  static roomAvailability = async (request: AuthRequest, response: Response) => {
     try {
-      const { bookingId, departureDate, note } = request.body;
-
-      const booking = await BookingService.get(bookingId);
-      if (!booking) {
-        response.status(404).send("Booking not found");
+      const arrivalDate = text(request.query.arrivalDate);
+      const departureDate = text(request.query.departureDate);
+      const excludeBookingId = text(request.query.excludeBookingId);
+      if (!isValidDateStr(arrivalDate) || (departureDate && !isValidDateStr(departureDate))) {
+        response.status(400).json({ message: "Valid arrivalDate (and optional departureDate) are required" });
         return;
       }
-
-      const newDeparture = text(departureDate);
-      if (!newDeparture) {
-        response.status(400).send("New departure date is required");
+      if (excludeBookingId && !/^[a-f\d]{24}$/i.test(excludeBookingId)) {
+        response.status(400).json({ message: "Invalid booking id" });
         return;
       }
-
-      const error = validateArrivalDateTime(
-        booking.arrivalDate,
-        booking.arrivalTime,
-        newDeparture,
-        true,
+      const rooms: any[] = await RoomModel.find().sort({ roomNumber: 1, category: 1 }).lean();
+      const result = await Promise.all(
+        rooms.map(async (room) => {
+          const conflicts = await AvailabilityService.roomConflicts(
+            String(room._id),
+            arrivalDate,
+            departureDate,
+            excludeBookingId || undefined,
+          );
+          const available = room.status !== "maintenance" && conflicts.length === 0;
+          return {
+            _id: String(room._id),
+            roomNumber: room.roomNumber || "",
+            category: room.category,
+            price: room.price,
+            discount: room.discount || 0,
+            nightlyRate: stayTotal({ room, nights: 1 }).nightlyRate,
+            maxHead: room.maxHead,
+            status: room.status,
+            image: room.image || "",
+            available,
+            reason:
+              room.status === "maintenance"
+                ? "Under maintenance"
+                : conflicts.length > 0
+                  ? `Booked ${(conflicts[0] as any).arrivalDate} → ${(conflicts[0] as any).departureDate || "open"}`
+                  : "",
+          };
+        }),
       );
-      if (error) {
-        response.status(400).send(error);
-        return;
-      }
-
-      const account = request.account;
-      const changedBy = account?.name || "Staff";
-
-      await BookingService.update(bookingId, {
-        clientName: booking.clientName,
-        clientAddress: booking.clientAddress,
-        type: booking.type,
-        status: booking.status,
-        arrivalDate: booking.arrivalDate,
-        arrivalTime: booking.arrivalTime,
-        departureDate: newDeparture,
-        room: booking.room?._id ? String(booking.room._id) : String(booking.room ?? ""),
-      });
-
-      await BookingService.recordModification(bookingId, {
-        field: "departureDate",
-        from: booking.departureDate || "",
-        to: newDeparture,
-        note: note ? `Stay extended: ${note}` : "Stay extended",
-        changedBy,
-        changedAt: new Date(),
-      });
-
-      await logAuditAction({
-        action: "STAY_EXTENDED",
-        details: `Booking ${bookingId} extended by ${changedBy}: departure ${booking.departureDate || "-"} → ${newDeparture}${note ? ` · ${note}` : ""}`,
-        actorName: changedBy,
-        actorRole: account?.type || "employee",
-        targetType: "booking",
-        targetId: bookingId,
-      });
-
-      response.send({ success: true });
+      response.send(result);
     } catch (error) {
-      console.log("Failed to extend stay: " + (error as Error).message);
-      response
-        .status(500)
-        .send("Failed to extend stay: " + (error as Error).message);
+      console.log("Failed to check room availability: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to check room availability" });
+    }
+  };
+
+  static reservationBoard = async (request: AuthRequest, response: Response) => {
+    try {
+      const system = await SystemService.get();
+      const graceMinutes = resolveGraceMinutes(system);
+      const now = new Date();
+      const bookings: any[] = await BookingsModel.find({ status: "reservation" })
+        .populate("room")
+        .sort({ arrivalDate: 1, arrivalTime: 1 })
+        .lean();
+      const items = bookings.map((booking) => {
+        const timeline = arrivalTimeline(booking, graceMinutes, now);
+        const planned = stayTotal({
+          room: booking.room,
+          nights: plannedNights(booking.arrivalDate, booking.departureDate),
+          addOnsTotal: Number(booking.addOnsTotal) || 0,
+        });
+        const { verificationCode, paymentSessionId, ...rest } = booking;
+        return {
+          ...rest,
+          revision: Number(booking.revision) || 0,
+          arrivalState: timeline?.state || "upcoming",
+          arrivalAt: timeline?.arrivalAt?.toISOString() || null,
+          graceEndsAt: timeline?.graceEndsAt?.toISOString() || null,
+          plannedTotal: planned.total,
+          balanceDue: Math.max(0, planned.total - (Number(booking.paymentAmount) || 0)),
+          creditDue: Math.max(0, (Number(booking.paymentAmount) || 0) - planned.total),
+        };
+      });
+      response.send({
+        serverTime: now.toISOString(),
+        timeZone: HOTEL_TIME_ZONE,
+        graceMinutes,
+        items,
+      });
+    } catch (error) {
+      console.log("Failed to load reservation board: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to load reservations" });
     }
   };
 }

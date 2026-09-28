@@ -40,7 +40,7 @@ export function PartialPaymentModal({ booking }: Props) {
   const nights = Math.max(1, getDaysFromDate(booking.arrivalDate));
 
   const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
-  const totalBill = Math.max(0, Math.round(discountedPrice * nights));
+  const totalBill = Math.max(0, Math.round(discountedPrice * nights) + (booking.addOnsTotal || 0));
   const alreadyPaid = Math.max(0, booking.paymentAmount || 0);
   const remainingBalance = Math.max(0, totalBill - alreadyPaid);
 
