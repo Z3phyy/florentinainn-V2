@@ -24,6 +24,7 @@ import {
   CalendarDays,
   SprayCan,
   ClipboardList,
+  Archive,
 } from "lucide-react";
 import {
   Sidebar,
@@ -75,6 +76,11 @@ const navigationItems = [
     title: "Reservation History",
     url: "/pages/admin/reservation-history",
     icon: ClipboardList,
+  },
+  {
+    title: "Archive",
+    url: "/pages/admin/archive",
+    icon: Archive,
   },
   {
     title: "System Configuration",

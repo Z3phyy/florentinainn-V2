@@ -137,6 +137,7 @@ export interface bookingInterface  {
     addOnsTotal?: number,
     billingAdjustments?: billingAdjustment[],
     revision?: number,
+    referenceCode?: string,
     room : roomInterface,
 }
 export type reservationPaymentStatus = "paid" | "partial" | "unpaid";

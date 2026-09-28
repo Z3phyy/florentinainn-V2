@@ -26,7 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AddStaffModal } from "./components/addStaffModal";
 import { EditStaffModal } from "./components/editStaffModal";
 import { PendingStaffModal } from "./components/pendingStaffModal";
-import { Search, ChevronLeft, ChevronRight, Power, RotateCcw, LogOut, Ban, KeyRound } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Power, RotateCcw, LogOut, Ban, KeyRound, Archive } from "lucide-react";
 import useUserStore from "@/app/store/useUserStore";
 import { getApiErrorMessage } from "@/app/utils/apiError";
 import { AccessCodeDialog } from "@/components/ui/accessCodeDialog";
@@ -150,6 +150,16 @@ export default function Page() {
       invalidateStaff();
     },
     onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to unsuspend staff member.")),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      axiosInstance.delete("/account/permanent", { data: { _id: id, reason } }),
+    onSuccess: () => {
+      successAlert("Staff account archived. It can be restored from the Archive.");
+      invalidateStaff();
+    },
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to archive staff account.")),
   });
 
   const forceLogoutMutation = useMutation({
@@ -344,6 +354,20 @@ export default function Page() {
                         >
                           <RotateCcw className="size-3.5 text-green-600" />
                         </Button>
+                      )}
+                      {isSuperAdmin && (statusKey === "inactive" || statusKey === "rejected") && (
+                        <ReasonDialog
+                          trigger={
+                            <Button variant="ghost" size="icon-sm" title="Archive account" aria-label="Archive account">
+                              <Archive className="size-3.5 text-muted-foreground" />
+                            </Button>
+                          }
+                          title={`Archive ${staff.name}?`}
+                          description="Archived accounts are hidden from Staff Management and cannot sign in. Their history is kept and the account can be restored from the Archive."
+                          confirmLabel="Archive Account"
+                          isPending={archiveMutation.isPending}
+                          onConfirm={(reason) => archiveMutation.mutateAsync({ id: staff._id, reason })}
+                        />
                       )}
                       {isSuperAdmin && statusKey === "active" && (
                         <Button

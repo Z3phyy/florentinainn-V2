@@ -39,7 +39,10 @@ import {
 } from "../utils/authToken";
 import { AccessCodeService, AccessCodeOwner } from "../services/accessCode.service";
 import { isStaffBlocked, isAdminBlocked } from "../middleware/auth";
-import { sendApprovalEmail, sendRejectionEmail } from "../utils/sendEmail";
+import UsedChallengeModel from "../model/usedChallenge.model";
+import AccountModel from "../model/account.model";
+import { SecurityAlertService } from "../services/securityAlert.service";
+import { sendApprovalEmail, sendRejectionEmail, describeEmailFailure } from "../utils/sendEmail";
 import {
   PERMISSION_VALUES,
   PERMISSION_MATRIX,
@@ -399,7 +402,7 @@ export class AccountController {
     challengeToken: unknown,
     expectedStage: AccessCodeStage,
   ): Promise<
-    | { ok: true; doc: any; role: AccountRole; owner: AccessCodeOwner; id: string }
+    | { ok: true; doc: any; role: AccountRole; owner: AccessCodeOwner; id: string; jti: string }
     | { ok: false; status: number; body: Record<string, unknown> }
   > => {
     const challenge = verifyChallengeToken(challengeToken);
@@ -452,15 +455,33 @@ export class AccountController {
       };
     }
 
-    return { ok: true, doc, role: challenge.role, owner, id: challenge.id };
+    return { ok: true, doc, role: challenge.role, owner, id: challenge.id, jti: challenge.jti };
   };
 
   private static completeLogin = async (
     doc: any,
     role: AccountRole,
+    request: AuthRequest,
     response: Response,
+    jti: string,
   ) => {
     const id = String(doc._id);
+    try {
+      await UsedChallengeModel.create({
+        jti,
+        accountId: id,
+        expiresAt: new Date(Date.now() + (ACCESS_CODE_CHALLENGE_TTL_SECONDS + 300) * 1000),
+      });
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        response.status(401).json({
+          message: "This sign-in was already completed. Please sign in again.",
+          code: "CHALLENGE_INVALID",
+        });
+        return;
+      }
+      throw error;
+    }
     if (role === "employee") {
       await AccountService.touchLastLogin(id);
     } else {
@@ -491,6 +512,17 @@ export class AccountController {
       account: safeAccount,
       token,
       role,
+    });
+
+    SecurityAlertService.loginSucceeded({
+      accountId: id,
+      name: doc.name || "",
+      email: doc.email || "",
+      role,
+      ip: request.ip,
+      userAgent: request.headers["user-agent"],
+    }).catch((error) => {
+      console.log("[security] failed to record login alert: " + (error as Error).message);
     });
   };
 
@@ -559,7 +591,7 @@ export class AccountController {
       }
 
       await LoginAttemptService.reset([codeKey]);
-      await AccountController.completeLogin(doc, role, response);
+      await AccountController.completeLogin(doc, role, request, response, resolved.jti);
     } catch (error) {
       console.error("verifyAccessCode error:", error);
       response.status(500).json({ message: "Server error" });
@@ -615,7 +647,7 @@ export class AccountController {
         targetId: id,
       });
 
-      await AccountController.completeLogin(doc, role, response);
+      await AccountController.completeLogin(doc, role, request, response, resolved.jti);
     } catch (error) {
       console.error("setupAccessCode error:", error);
       response.status(500).json({ message: "Server error" });
@@ -851,10 +883,10 @@ export class AccountController {
     }
   };
 
-  // Hard deletion (super admin only use; normal "delete" is the soft deactivate above)
   static removeAccountPermanently = async (request: AuthRequest, response: Response) => {
     try {
       const { _id } = request.body || {};
+      const reason = typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : "";
       if (!isValidObjectId(_id)) {
         response.status(400).send({ message: "A valid staff id is required." });
         return;
@@ -864,19 +896,34 @@ export class AccountController {
         response.status(404).send({ message: "Account not found" });
         return;
       }
-      await AccountService.delete(_id);
+      const archived = await AccountModel.findOneAndUpdate(
+        { _id, deletedAt: null },
+        {
+          $set: {
+            deletedAt: new Date(),
+            deletedBy: request.account?.name || "Super Admin",
+            deleteReason: reason,
+          },
+          $inc: { sessionVersion: 1 },
+        },
+        { new: true },
+      );
+      if (!archived) {
+        response.status(409).send({ message: "Account was already archived" });
+        return;
+      }
       await logAuditAction({
-        action: "STAFF_DELETED",
-        details: `Permanently removed staff account ${_id}`,
+        action: "STAFF_ARCHIVED",
+        details: `Archived staff account ${account.name} (${account.email})${reason ? ` — ${reason}` : ""}`,
         actorName: request.account?.name || "Administrator",
         actorRole: request.account?.type || "admin",
         targetType: "staff",
         targetId: _id,
       });
-      response.send({ message: "Staff permanently removed" });
+      response.send({ message: "Staff account archived. It can be restored from the Archive." });
     } catch (error) {
       console.error("removeAccountPermanently error:", error);
-      response.status(500).send("Server error");
+      response.status(500).send({ message: "Server error" });
     }
   };
 
@@ -903,11 +950,15 @@ export class AccountController {
 
       await AccountService.approve(_id);
 
+      let emailStatus: { sent: boolean; code?: string; message?: string } = { sent: false, code: "no_email" };
       if (account.email) {
         try {
           await sendApprovalEmail({ to: account.email, email: account.email });
+          emailStatus = { sent: true };
         } catch (emailError) {
-          console.log("Approval email failed: " + (emailError as Error).message);
+          const failure = describeEmailFailure(emailError);
+          emailStatus = { sent: false, code: failure.code, message: failure.message };
+          console.log(`Approval email failed: code=${failure.code}`);
         }
       }
 
@@ -930,7 +981,7 @@ export class AccountController {
         targetId: _id,
       });
 
-      response.send({ message: "Staff account approved" });
+      response.send({ message: "Staff account approved", email: emailStatus });
     } catch (error) {
       console.log("Failed to approve account: " + (error as Error).message);
       response
@@ -959,11 +1010,15 @@ export class AccountController {
         return;
       }
 
+      let emailStatus: { sent: boolean; code?: string; message?: string } = { sent: false, code: "no_email" };
       if (account.email) {
         try {
           await sendRejectionEmail({ to: account.email, email: account.email });
+          emailStatus = { sent: true };
         } catch (emailError) {
-          console.log("Rejection email failed: " + (emailError as Error).message);
+          const failure = describeEmailFailure(emailError);
+          emailStatus = { sent: false, code: failure.code, message: failure.message };
+          console.log(`Rejection email failed: code=${failure.code}`);
         }
       }
 
@@ -992,7 +1047,7 @@ export class AccountController {
         targetId: _id,
       });
 
-      response.send({ message: "Staff application rejected" });
+      response.send({ message: "Staff application rejected", email: emailStatus });
     } catch (error) {
       console.log("Failed to reject account: " + (error as Error).message);
       response

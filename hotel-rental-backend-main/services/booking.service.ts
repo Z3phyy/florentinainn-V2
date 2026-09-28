@@ -421,6 +421,7 @@ export class BookingService {
             { clientEmail: re },
             { clientPhone: re },
             { paymentRefNumber: re },
+            { referenceCode: re },
             { bookingId: re },
             { "roomDoc.roomNumber": re },
             { "roomDoc.category": re },
@@ -445,7 +446,7 @@ export class BookingService {
               $project: {
                 _id: 0,
                 bookingId: 1,
-                reference: { $toUpper: { $substrCP: ["$bookingId", 16, 8] } },
+                reference: { $ifNull: ["$referenceCode", { $toUpper: { $substrCP: ["$bookingId", 16, 8] } }] },
                 clientName: 1,
                 clientEmail: 1,
                 clientPhone: 1,

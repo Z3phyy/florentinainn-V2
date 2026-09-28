@@ -181,6 +181,7 @@ export interface StayReceiptData {
   showChange: boolean;
   cashierName: string;
   issuedAt: string;
+  reservationCode?: string;
 }
 
 export function buildStayReceiptHtml(data: StayReceiptData): string {
@@ -249,6 +250,11 @@ ${lines}
       <div><span class="rcpt-stamp paid">PAID</span></div>
     </div>
 
+    ${
+      data.reservationCode
+        ? `<p class="rcpt-sign">Reservation code <strong>${escapeHtml(data.reservationCode)}</strong> &middot; use it on Track My Booking to review your stay.</p>`
+        : ""
+    }
     <p class="rcpt-sign">Generated ${escapeHtml(data.issuedAt)} &middot; This receipt is computer generated.</p>
   </div>`;
 }

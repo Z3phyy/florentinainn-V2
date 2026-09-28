@@ -6,6 +6,7 @@ import systemRoute from "./system.route"
 import reportRoute from "./report.route"
 import addOnRoute from "./addOn.route"
 import reviewRoute from "./review.route"
+import archiveRoute from "./archive.route"
 
 const routes = Router()
 
@@ -16,5 +17,6 @@ routes.use("/system", systemRoute)
 routes.use("/reports", reportRoute)
 routes.use("/addons", addOnRoute)
 routes.use("/review", reviewRoute)
+routes.use("/archive", archiveRoute)
 
 export default routes

@@ -1,3 +1,4 @@
+import { softDeletePlugin } from "../utils/softDelete";
 import mongoose, { Schema } from 'mongoose';
 
 
@@ -31,6 +32,7 @@ const AccountSchema = new Schema({
     otpAttempts : { type: Number, required: false, default: 0 },
 });
 
+AccountSchema.plugin(softDeletePlugin);
 AccountSchema.index({ email: 1 });
 AccountSchema.index({ isApproved: 1, isActive: 1, isSuspended: 1 });
 

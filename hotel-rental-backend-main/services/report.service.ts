@@ -26,7 +26,7 @@ function inPeriod(value: string, month: ReportMonth, year: number): boolean {
 
 export class ReportService {
   static async getOccupancyReport() {
-    const rooms = await RoomModel.find().sort({ category: 1 });
+    const rooms = await RoomModel.find({ deletedAt: null }).sort({ category: 1 });
     return rooms.map((room: any) => ({
       roomId: room._id,
       roomNumber: room.roomNumber || "",

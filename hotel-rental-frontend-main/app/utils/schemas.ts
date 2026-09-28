@@ -333,3 +333,30 @@ export const reviewSchema = z.object({
     .min(10, "Please write at least 10 characters about your stay.")
     .max(1000, "Reviews can be at most 1000 characters."),
 });
+
+export const RESERVATION_CODE_PATTERN = /^RES-?[0-9A-HJKMNP-TV-Z]{5}-?[0-9A-HJKMNP-TV-Z]{5}$/;
+export const LEGACY_CODE_PATTERN = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+
+export const isLegacyReservationCode = (value: string) => LEGACY_CODE_PATTERN.test(value.trim().toUpperCase());
+
+export const reservationCodeSchema = z
+  .string()
+  .trim()
+  .min(1, "Reservation code is required.")
+  .refine(
+    (v) => {
+      const upper = v.toUpperCase().replace(/\s/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+      return RESERVATION_CODE_PATTERN.test(upper) || LEGACY_CODE_PATTERN.test(v.trim().toUpperCase());
+    },
+    "Enter the code from your confirmation, e.g. RES-7K2QD-M9X4P.",
+  );
+
+export const trackBookingSchema = z
+  .object({
+    code: reservationCodeSchema,
+    bookingId: z.string().trim(),
+  })
+  .refine((d) => !isLegacyReservationCode(d.code) || /^[a-f0-9]{24}$/i.test(d.bookingId), {
+    path: ["bookingId"],
+    message: "Older codes also need the 24-character booking reference from your confirmation link.",
+  });

@@ -75,6 +75,7 @@ export interface bookingInterfaceInput {
     earlyCheckout?: boolean,
     wasRescheduled?: boolean,
     verificationCode?: string,
+    referenceCode?: string,
     modificationHistory?: bookingModification[],
     addOns?: bookingAddOn[],
     addOnsTotal?: number,
@@ -111,6 +112,7 @@ export interface bookingInterface  {
     earlyCheckout?: boolean,
     wasRescheduled?: boolean,
     verificationCode?: string,
+    referenceCode?: string,
     modificationHistory?: bookingModification[],
     room : roomInterface,
 }

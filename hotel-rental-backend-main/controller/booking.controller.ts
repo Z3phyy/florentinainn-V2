@@ -11,6 +11,10 @@ import {
 import { BookingService } from "../services/booking.service";
 import { AddOnError, AddOnSelection, AddOnService, parseAddOnSelection } from "../services/addOn.service";
 import { runAtomic } from "../utils/transaction";
+import { generateReferenceCode } from "../utils/referenceCode";
+import { CodeLookupError, CodeLookupService } from "../services/codeLookup.service";
+import ReviewModel from "../model/review.model";
+import { Types } from "mongoose";
 import { ReservationError, ReservationService, ModificationInput } from "../services/reservation.service";
 import { AvailabilityService } from "../services/availability.service";
 import { arrivalTimeline, resolveGraceMinutes } from "../services/reservationMonitor.service";
@@ -43,11 +47,6 @@ function generateFolio(bookingId?: string): string {
   return `FOL-${today}-${code}`;
 }
 
-function generateVerificationCode(bookingId: string): string {
-  const suffix = bookingId.slice(-4).toUpperCase();
-  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `${suffix}-${random}`;
-}
 
 function validateArrivalDateTime(
   arrivalDate: string,
@@ -96,6 +95,24 @@ async function createBookingWithAddOns(
   selection: AddOnSelection[],
   roomDoc: any,
 ) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await insertBookingWithAddOns(data, selection, roomDoc, generateReferenceCode());
+    } catch (error) {
+      const duplicateReference =
+        (error as { code?: number; keyPattern?: Record<string, unknown> }).code === 11000 &&
+        !!(error as { keyPattern?: Record<string, unknown> }).keyPattern?.referenceCode;
+      if (!duplicateReference || attempt >= 4) throw error;
+    }
+  }
+}
+
+async function insertBookingWithAddOns(
+  data: bookingInterfaceInput,
+  selection: AddOnSelection[],
+  roomDoc: any,
+  referenceCode: string,
+) {
   return runAtomic(async (session) => {
     if (session) {
       await AddOnService.lock(selection.map((s) => s.addOnId), session);
@@ -114,6 +131,7 @@ async function createBookingWithAddOns(
       [
         {
           ...data,
+          referenceCode,
           addOns: priced.items,
           addOnsTotal: priced.total,
           totalAmount: totals.total,
@@ -233,9 +251,13 @@ export class BookingController {
         nights: plannedNights(booking.arrivalDate, booking.departureDate),
         addOnsTotal: Number(booking.addOnsTotal) || 0,
       });
+      const nameParts = String(booking.clientName || "Guest").trim().split(/\s+/);
       response.send({
         _id: String(booking._id),
-        clientName: booking.clientName,
+        clientName:
+          nameParts.length > 1
+            ? `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0).toUpperCase()}.`
+            : nameParts[0],
         type: booking.type,
         status: booking.status,
         guests: booking.guests,
@@ -354,69 +376,75 @@ export class BookingController {
   };
 
   static guestStatusLookup = async (request: AuthRequest, response: Response) => {
+    request.body = {
+      code: request.body?.verificationCode,
+      bookingId: request.body?.bookingId,
+    };
+    await BookingController.trackBooking(request, response);
+  };
+
+  static trackBooking = async (request: AuthRequest, response: Response) => {
     try {
-      const { bookingId, verificationCode } = request.body;
-
-      if (!bookingId || typeof bookingId !== "string") {
-        response.status(400).send("Booking reference is required");
-        return;
-      }
-
-      if (!verificationCode || typeof verificationCode !== "string") {
-        response
-          .status(400)
-          .send("The verification code from your confirmation email is required");
-        return;
-      }
-
-      const booking = await BookingService.get(bookingId);
-      if (!booking) {
-        response.status(404).send("Booking not found");
-        return;
-      }
-
-      if (!booking.verificationCode) {
-        response
-          .status(403)
-          .send(
-            "This booking has no verification code on record. Contact the front desk to verify your reservation.",
-          );
-        return;
-      }
-
-      if (verificationCode.trim().toUpperCase() !== booking.verificationCode) {
-        response.status(403).send("Incorrect verification code");
-        return;
-      }
-
-      const roomLabel =
-        booking.room && typeof booking.room === "object"
-          ? `${(booking.room as { roomNumber?: string }).roomNumber ? `Room ${(booking.room as { roomNumber?: string }).roomNumber} · ` : ""}${(booking.room as { category?: string }).category || "Room"}`
-          : "Room";
-
+      const booking = await CodeLookupService.findBooking({
+        code: request.body?.code,
+        bookingId: request.body?.bookingId,
+        ip: request.ip,
+      });
+      const room = booking.room || {};
+      const planned = stayTotal({
+        room,
+        nights: plannedNights(booking.arrivalDate, booking.departureDate),
+        addOnsTotal: Number(booking.addOnsTotal) || 0,
+      });
+      const total = Number(booking.totalAmount) > 0 ? Number(booking.totalAmount) : planned.total;
+      const amountPaid = Number(booking.paymentAmount) || 0;
+      const reviewed = await ReviewModel.exists({ booking: booking._id }).setOptions({ withDeleted: true });
+      const nameParts = String(booking.clientName || "Guest").trim().split(/\s+/);
       response.send({
+        reference: booking.referenceCode || "",
         status: booking.status,
         type: booking.type,
-        clientName: booking.clientName,
-        room: roomLabel,
+        guestName:
+          nameParts.length > 1
+            ? `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0).toUpperCase()}.`
+            : nameParts[0],
+        room: {
+          label: room.roomNumber ? `Room ${room.roomNumber} · ${room.category || "Room"}` : room.category || "Room",
+          category: room.category || "",
+          image: room.image || "",
+        },
         arrivalDate: booking.arrivalDate,
         arrivalTime: booking.arrivalTime,
         departureDate: booking.departureDate || "",
-        guests: booking.guests,
-        amountPaid: Number(booking.paymentAmount) || 0,
-        totalAmount: Number(booking.totalAmount) || 0,
-        paymentMethod: booking.paymentMethod || "",
-        paymentRefNumber: booking.paymentRefNumber || "",
+        nights: planned.nights,
+        guests: booking.guests || 1,
+        roomSubtotal: planned.roomSubtotal,
+        addOns: (booking.addOns || []).map((a: any) => ({
+          name: a.name,
+          quantity: a.quantity,
+          subtotal: a.subtotal,
+        })),
+        addOnsTotal: Number(booking.addOnsTotal) || 0,
+        total,
+        amountPaid,
+        balanceDue: ["canceled", "no-show"].includes(booking.status) ? 0 : Math.max(0, total - amountPaid),
+        paymentStatus: amountPaid <= 0 ? "unpaid" : amountPaid >= total ? "paid" : "partial",
         nonRefundable: booking.nonRefundable === true,
-        policyAcceptedAt: booking.policyAcceptedAt || null,
-        noShowAt: booking.noShowAt || null,
-        canceledAt: booking.canceledAt || null,
-        cancellationReason: booking.cancellationReason || "",
+        createdAt: new Types.ObjectId(String(booking._id)).getTimestamp(),
         checkedOutAt: booking.checkedOutAt || null,
+        canceledAt: booking.canceledAt || null,
+        noShowAt: booking.noShowAt || null,
+        canReview: booking.status === "completed" && !reviewed,
+        reviewed: !!reviewed,
       });
     } catch (error) {
-      console.log("Failed to look up booking: " + (error as Error).message);
-      response.status(500).send("Failed to look up booking");
+      if (error instanceof CodeLookupError) {
+        if (error.retryAfterSeconds) response.setHeader("Retry-After", String(error.retryAfterSeconds));
+        response.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.log("Failed to track booking: " + (error as Error).message);
+      response.status(500).json({ message: "Failed to look up booking" });
     }
   };
 
@@ -458,7 +486,7 @@ export class BookingController {
         return;
       }
 
-      const roomDoc = await RoomService.get(room);
+      const roomDoc = await RoomService.getActive(room);
       if (!roomDoc) {
         response.status(404).send("Room not found");
         return;
@@ -631,7 +659,7 @@ export class BookingController {
 
       let newRoomDoc: any = null;
       if (newRoomId !== currentRoomId) {
-        const newRoom = await RoomService.get(newRoomId);
+        const newRoom = await RoomService.getActive(newRoomId);
         if (!newRoom) {
           response.status(404).send("Room not found");
           return;
@@ -751,7 +779,12 @@ export class BookingController {
 
   static deleteBooking = async (request: AuthRequest, response: Response) => {
     try {
-      const { _id } = request.body;
+      const { _id } = request.body || {};
+      const reason = text(request.body?.reason).slice(0, 300);
+      if (typeof _id !== "string" || !Types.ObjectId.isValid(_id)) {
+        response.status(400).send("A valid booking id is required");
+        return;
+      }
 
       const booking = await BookingService.get(_id);
       if (!booking) {
@@ -759,7 +792,21 @@ export class BookingController {
         return;
       }
 
-      await BookingService.delete(_id);
+      const archived = await BookingsModel.findOneAndUpdate(
+        { _id, deletedAt: null },
+        {
+          $set: {
+            deletedAt: new Date(),
+            deletedBy: request.account?.name || "Staff",
+            deleteReason: reason,
+          },
+        },
+        { new: true },
+      );
+      if (!archived) {
+        response.status(409).send("Booking was already archived");
+        return;
+      }
       await BookingService.reconcileRoomStatus(
         booking.room?._id
           ? String(booking.room._id)
@@ -767,8 +814,8 @@ export class BookingController {
       );
 
       await logAuditAction({
-        action: "BOOKING_DELETED",
-        details: `Deleted booking with ID ${_id}`,
+        action: "BOOKING_ARCHIVED",
+        details: `Archived booking ${booking.referenceCode || _id} for ${booking.clientName} (${booking.status})${reason ? ` — ${reason}` : ""}`,
         actorName: request.account?.name || "Staff",
         actorRole: request.account?.type || "employee",
         targetType: "booking",
@@ -777,10 +824,8 @@ export class BookingController {
       const bookings = await BookingService.getAll();
       response.send(bookings);
     } catch (error) {
-      console.log("Failed to delete booking: " + (error as Error).message);
-      response
-        .status(500)
-        .send("Failed to delete booking: " + (error as Error).message);
+      console.log("Failed to archive booking: " + (error as Error).message);
+      response.status(500).send("Failed to archive booking");
     }
   };
 
@@ -1149,7 +1194,7 @@ export class BookingController {
         return;
       }
 
-      const roomDoc = await RoomService.get(room);
+      const roomDoc = await RoomService.getActive(room);
       if (!roomDoc) {
         response.status(404).send("Room not found");
         return;
@@ -1228,7 +1273,7 @@ export class BookingController {
         }
         throw error;
       }
-      const verificationCode = generateVerificationCode(String(booking._id));
+      const verificationCode = booking.referenceCode as string;
       await BookingService.setVerificationCode(
         String(booking._id),
         verificationCode,
@@ -1250,6 +1295,7 @@ export class BookingController {
       response.send({
         bookingId: booking._id,
         verificationCode,
+        referenceCode: verificationCode,
         nonRefundable: true,
         pricing: await reservationPricing(booking),
       });
@@ -1308,12 +1354,16 @@ export class BookingController {
       const {
         bookingId,
         amount,
-        paymentBy,
         method,
         refNumber,
         gateway,
         sessionId,
       } = request.body;
+
+      if (typeof bookingId !== "string" || !Types.ObjectId.isValid(bookingId)) {
+        response.status(400).send("Invalid booking reference");
+        return;
+      }
 
       const booking = await BookingService.get(bookingId);
 
@@ -1326,6 +1376,8 @@ export class BookingController {
         response.status(409).send("Booking reservation already confirmed");
         return;
       }
+
+      const paymentBy = booking.clientName;
 
       if (booking.status === "reservation") {
         response.send("success");
@@ -1894,7 +1946,7 @@ export class BookingController {
         response.status(400).json({ message: "Invalid booking id" });
         return;
       }
-      const rooms: any[] = await RoomModel.find().sort({ roomNumber: 1, category: 1 }).lean();
+      const rooms: any[] = await RoomModel.find({ deletedAt: null }).sort({ roomNumber: 1, category: 1 }).lean();
       const result = await Promise.all(
         rooms.map(async (room) => {
           const conflicts = await AvailabilityService.roomConflicts(

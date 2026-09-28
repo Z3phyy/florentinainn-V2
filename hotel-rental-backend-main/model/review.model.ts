@@ -1,3 +1,4 @@
+import { softDeletePlugin } from "../utils/softDelete";
 import mongoose, { Schema } from "mongoose";
 
 const ReviewSchema = new Schema(
@@ -14,6 +15,7 @@ const ReviewSchema = new Schema(
   { timestamps: true },
 );
 
+ReviewSchema.plugin(softDeletePlugin);
 ReviewSchema.index({ room: 1, status: 1, createdAt: -1 });
 
 export default mongoose.model("Reviews", ReviewSchema);

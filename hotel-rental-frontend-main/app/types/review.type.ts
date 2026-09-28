@@ -23,6 +23,13 @@ export interface reviewEligibility {
     reason?: "already_reviewed" | "not_completed";
     status?: string;
     roomLabel?: string;
+    roomId?: string;
     message?: string;
     review?: reviewInterface;
+}
+
+export interface latestReviewsResult {
+    items: (reviewInterface & { roomLabel?: string })[];
+    averageRating: number | null;
+    reviewCount: number;
 }

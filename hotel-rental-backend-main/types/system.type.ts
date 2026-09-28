@@ -3,6 +3,8 @@ export interface systemInterfaceInput {
     paymentMin: number,
     gracePeriodHours?: number,
     gracePeriodMinutes?: number,
+    securityAlertEmail?: string,
+    securityAlertScope?: string,
     logo: string,
     systemName: string,
     header: string,

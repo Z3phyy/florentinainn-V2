@@ -23,6 +23,8 @@ import { AdminAccounts } from "./components/adminAccounts";
 import { BackupRestore } from "./components/backupRestore";
 import { AccessCodeSettings } from "./components/accessCodeSettings";
 import { AddOnManager } from "./components/addOnManager";
+import { SecurityAlertSettings } from "./components/securityAlertSettings";
+import { EmailDiagnostics } from "./components/emailDiagnostics";
 import { Loader2, Save, Building2, Sparkles, Layout } from "lucide-react";
 
 type SettingsValues = z.input<typeof systemSettingsSchema>;
@@ -427,6 +429,10 @@ export default function Page() {
             </form>
 
             <AccessCodeSettings />
+
+            <SecurityAlertSettings systemInfo={systemInfo} />
+
+            <EmailDiagnostics />
 
             <AddOnManager />
 

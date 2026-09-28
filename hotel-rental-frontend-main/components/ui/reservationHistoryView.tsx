@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, keepPreviousData, useMutation, useQueryClient } from "@tanstack/react-query";
+import useUserStore from "@/app/store/useUserStore";
+import { errorAlert, successAlert } from "@/app/utils/alert";
+import { ReasonDialog } from "@/components/ui/reasonDialog";
 import axiosInstance from "@/app/utils/axios";
 import { getApiErrorMessage } from "@/app/utils/apiError";
 import {
@@ -30,6 +33,7 @@ import {
 import { BookingHistoryDialog } from "@/app/pages/staff/reservation/components/bookingHistoryDialog";
 import {
   AlertTriangle,
+  Archive,
   ChevronLeft,
   ChevronRight,
   History,
@@ -106,6 +110,18 @@ function Badge({ map, value }: { map: Record<string, { label: string; cls: strin
 }
 
 export function ReservationHistoryView() {
+  const queryClient = useQueryClient();
+  const user = useUserStore((s) => s.user);
+  const isAdmin = user?.type === "admin" || user?.type === "super admin";
+  const archiveMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => axiosInstance.delete("/booking", { data: { _id: id, reason } }),
+    onSuccess: () => {
+      successAlert("Reservation archived. You can restore it from the Archive.");
+      queryClient.invalidateQueries({ queryKey: ["reservation-history"] });
+      queryClient.invalidateQueries({ queryKey: ["archive"] });
+    },
+    onError: (err) => errorAlert(getApiErrorMessage(err, "Failed to archive reservation.")),
+  });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -366,7 +382,23 @@ export function ReservationHistoryView() {
                     <p>{formatDateTime(item.updatedAt)}</p>
                   </TableCell>
                   <TableCell className="text-right">
-                    <BookingHistoryDialog booking={{ modificationHistory: item.modificationHistory }} />
+                    <div className="flex items-center justify-end gap-1">
+                      <BookingHistoryDialog booking={{ modificationHistory: item.modificationHistory }} />
+                      {isAdmin && (
+                        <ReasonDialog
+                          trigger={
+                            <Button variant="ghost" size="icon-sm" title="Archive reservation" aria-label="Archive reservation">
+                              <Archive className="size-3.5 text-muted-foreground" />
+                            </Button>
+                          }
+                          title={`Archive ${item.reference}?`}
+                          description="The reservation is hidden from history and reports and releases its room. Payment records are kept. Restore it any time from the Archive."
+                          confirmLabel="Archive Reservation"
+                          isPending={archiveMutation.isPending}
+                          onConfirm={(reason) => archiveMutation.mutateAsync({ id: item.bookingId, reason })}
+                        />
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

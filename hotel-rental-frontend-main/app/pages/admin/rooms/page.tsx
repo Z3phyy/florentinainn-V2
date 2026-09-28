@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
+import { getApiErrorMessage } from "@/app/utils/apiError";
 import { roomInterface } from "@/app/types/room.type";
 import { successAlert, errorAlert, confirmAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Trash2,
   Percent,
   Loader2,
   Search,
-  X,
-} from "lucide-react";
+  X, Archive } from "lucide-react";
 
 export default function Page() {
   const queryClient = useQueryClient();
@@ -57,13 +56,11 @@ export default function Page() {
     mutationFn: (id: string) =>
       axiosInstance.delete("/room", { data: { _id: id } }),
     onSuccess: () => {
-      successAlert("Room deleted.");
+      successAlert("Room archived. You can restore it from Archive.");
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
     },
-    onError: (err: { response?: { data?: { message?: string } } }) => {
-      const message =
-        err.response?.data?.message || "Failed to delete room.";
-      errorAlert(message);
+    onError: (err) => {
+      errorAlert(getApiErrorMessage(err, "Failed to archive room."));
     },
   });
 
@@ -255,10 +252,16 @@ export default function Page() {
                       variant="ghost"
                       size="icon-sm"
                       onClick={() =>
-                        confirmAlert(`Delete room "${room.category}"?`, "Delete", () => deleteMutation.mutate(room._id))
+                        confirmAlert(
+                          `Archive room "${room.roomNumber ? `${room.roomNumber} · ` : ""}${room.category}"? It will be hidden from guests and staff, its booking history is kept, and an admin can restore it from the Archive.`,
+                          "Archive",
+                          () => deleteMutation.mutate(room._id),
+                        )
                       }
+                      title="Archive room"
+                      aria-label="Archive room"
                     >
-                      <Trash2 className="size-3.5 text-destructive" />
+                      <Archive className="size-3.5 text-destructive" />
                     </Button>
                   </div>
                 </TableCell>

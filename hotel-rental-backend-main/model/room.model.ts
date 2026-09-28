@@ -52,6 +52,9 @@ const RoomSchema = new Schema({
     maintenanceNotes: { type: String, default: "" },
     maintenanceHistory: { type: [MaintenanceHistorySchema], default: [] },
     bookingVersion: { type: Number, default: 0 },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: String, default: "" },
+    deleteReason: { type: String, default: "" },
 });
 
 export default mongoose.model('Rooms', RoomSchema)

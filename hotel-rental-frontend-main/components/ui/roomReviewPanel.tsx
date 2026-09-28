@@ -8,7 +8,7 @@ import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import { successAlert } from "@/app/utils/alert";
 import { getApiErrorMessage } from "@/app/utils/apiError";
-import { reviewSchema } from "@/app/utils/schemas";
+import { reservationCodeSchema, reviewSchema } from "@/app/utils/schemas";
 import { reviewEligibility } from "@/app/types/review.type";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,18 +18,41 @@ import { StarRating } from "@/components/ui/starRating";
 import { CheckCircle2, Clock, Loader2, MessageSquareHeart } from "lucide-react";
 
 type Values = z.input<typeof reviewSchema>;
+const codeFormSchema = z.object({ code: reservationCodeSchema });
 
-export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { bookingId: string; verificationCode?: string }) {
+export function RoomReviewPanel({
+  reservationCode: initialCode,
+  bookingId,
+  roomId,
+  bare,
+  onDone,
+}: {
+  reservationCode?: string;
+  bookingId?: string;
+  roomId?: string;
+  bare?: boolean;
+  onDone?: () => void;
+}) {
   const queryClient = useQueryClient();
-  const [codeInput, setCodeInput] = useState("");
-  const [code, setCode] = useState((initialCode || "").trim());
+  const [code, setCode] = useState((initialCode || "").trim().toUpperCase());
+
+  const identity = {
+    reservationCode: code,
+    ...(bookingId ? { bookingId } : {}),
+    ...(roomId ? { roomId } : {}),
+  };
 
   const eligibility = useQuery<reviewEligibility>({
-    queryKey: ["review-eligibility", bookingId, code],
-    enabled: !!bookingId && !!code,
+    queryKey: ["review-eligibility", code, bookingId || "", roomId || ""],
+    enabled: !!code,
     retry: false,
-    queryFn: async () =>
-      (await axiosInstance.post("/review/eligibility", { bookingId, verificationCode: code })).data,
+    queryFn: async () => (await axiosInstance.post("/review/eligibility", identity)).data,
+  });
+
+  const codeForm = useForm<z.input<typeof codeFormSchema>>({
+    resolver: zodResolver(codeFormSchema),
+    mode: "onTouched",
+    defaultValues: { code: "" },
   });
 
   const form = useForm<Values>({
@@ -41,45 +64,53 @@ export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { 
 
   const submit = useMutation({
     mutationFn: (values: Values) =>
-      axiosInstance.post("/review", { bookingId, verificationCode: code, rating: values.rating, comment: values.comment.trim() }),
+      axiosInstance.post("/review", { ...identity, rating: values.rating, comment: values.comment.trim() }),
     onSuccess: () => {
       successAlert("Thank you! Your review has been published.");
-      queryClient.invalidateQueries({ queryKey: ["review-eligibility", bookingId] });
+      queryClient.invalidateQueries({ queryKey: ["review-eligibility"] });
       queryClient.invalidateQueries({ queryKey: ["room-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["track-booking"] });
+      onDone?.();
     },
   });
 
-  const wrapper = "rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-6 space-y-4";
-  const title = (
+  const wrapper = bare ? "space-y-4" : "rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-6 space-y-4";
+  const title = bare ? null : (
     <h3 className="font-serif text-lg font-bold text-[#130005] dark:text-white flex items-center gap-2">
       <MessageSquareHeart className="size-5 text-[#900546]" />
-      Review Your Stay
+      Review This Room
     </h3>
   );
+  const resetCode = () => {
+    setCode("");
+    codeForm.reset({ code: "" });
+  };
 
   if (!code) {
     return (
       <section className={wrapper}>
         {title}
         <p className="text-xs text-[#5C454B] dark:text-gray-400">
-          Enter the verification code from your confirmation email to review the room you stayed in.
+          Enter the reservation code from your confirmation to review the room you stayed in.
         </p>
         <form
-          className="flex flex-col gap-2 sm:flex-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (codeInput.trim()) setCode(codeInput.trim().toUpperCase());
-          }}
+          className="space-y-3"
+          noValidate
+          onSubmit={codeForm.handleSubmit((values) => setCode(values.code.trim().toUpperCase()))}
         >
-          <Input
-            aria-label="Verification code"
-            placeholder="e.g. 1A2B-C3D4"
-            value={codeInput}
-            onChange={(e) => setCodeInput(e.target.value)}
-            className="font-mono uppercase"
-            maxLength={20}
-          />
-          <Button type="submit" disabled={!codeInput.trim()}>Continue</Button>
+          <FormField id="review-reservation-code" label="Reservation code" required error={codeForm.formState.errors.code?.message}>
+            <Input
+              id="review-reservation-code"
+              placeholder="RES-XXXXX-XXXXX"
+              className="font-mono uppercase"
+              maxLength={20}
+              autoComplete="off"
+              aria-invalid={!!codeForm.formState.errors.code}
+              {...codeForm.register("code")}
+            />
+          </FormField>
+          <Button type="submit">Continue</Button>
         </form>
       </section>
     );
@@ -90,7 +121,7 @@ export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { 
       <section className={wrapper}>
         {title}
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Checking your reservation...
+          <Loader2 className="size-4 animate-spin" /> Verifying your reservation...
         </p>
       </section>
     );
@@ -100,8 +131,10 @@ export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { 
     return (
       <section className={wrapper}>
         {title}
-        <p className="text-xs text-destructive">{getApiErrorMessage(eligibility.error, "We could not verify this reservation.")}</p>
-        <Button size="sm" variant="outline" onClick={() => { setCode(""); setCodeInput(""); }}>
+        <p role="alert" className="text-xs text-destructive">
+          {getApiErrorMessage(eligibility.error, "We could not verify this reservation code.")}
+        </p>
+        <Button size="sm" variant="outline" onClick={resetCode}>
           Try a different code
         </Button>
       </section>
@@ -116,9 +149,9 @@ export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { 
         <div className="flex items-start gap-3 rounded-2xl bg-emerald-500/10 p-4 text-xs text-emerald-800 dark:text-emerald-300">
           <CheckCircle2 className="size-4 shrink-0" />
           <div className="space-y-1">
-            <p className="font-semibold">You reviewed {data.roomLabel}.</p>
+            <p className="font-semibold">You already reviewed {data.roomLabel}.</p>
             <StarRating value={data.review.rating} readOnly size="sm" />
-            <p className="text-[#130005] dark:text-white">&ldquo;{data.review.comment}&rdquo;</p>
+            <p className="text-[#130005] dark:text-white break-words">&ldquo;{data.review.comment}&rdquo;</p>
           </div>
         </div>
       </section>
@@ -140,12 +173,10 @@ export function RoomReviewPanel({ bookingId, verificationCode: initialCode }: { 
   return (
     <section className={wrapper}>
       {title}
-      <p className="text-xs text-[#5C454B] dark:text-gray-400">How was your stay in {data.roomLabel}?</p>
-      <form
-        onSubmit={form.handleSubmit((values) => submit.mutate(values))}
-        className="space-y-4"
-        noValidate
-      >
+      <p className="text-xs text-[#5C454B] dark:text-gray-400">
+        Reservation <span className="font-mono font-semibold">{code}</span> · How was your stay in {data.roomLabel}?
+      </p>
+      <form onSubmit={form.handleSubmit((values) => submit.mutate(values))} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <p className="text-sm font-medium">
             Rating <span className="text-rose-600" aria-hidden="true">*</span>

@@ -9,6 +9,7 @@ import 'dotenv/config';
 import systemModel from './model/system.model';
 import { BackupService } from './services/backup.service';
 import { ReservationMonitor } from './services/reservationMonitor.service';
+import { generateReferenceCode } from './utils/referenceCode';
 
 
 dotenv.config();
@@ -59,6 +60,26 @@ const runSchemaMigrations = async () => {
     );
     if (accountRename.modifiedCount > 0) {
       console.log(`Migrated ${accountRename.modifiedCount} staff account(s): username -> email`);
+    }
+
+    const missingReferences = await mongoose.connection
+      .collection("bookings")
+      .find({ $or: [{ referenceCode: { $exists: false } }, { referenceCode: null }, { referenceCode: "" }] }, { projection: { _id: 1 } })
+      .toArray();
+    for (const booking of missingReferences) {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await mongoose.connection
+            .collection("bookings")
+            .updateOne({ _id: booking._id, $or: [{ referenceCode: { $exists: false } }, { referenceCode: null }, { referenceCode: "" }] }, { $set: { referenceCode: generateReferenceCode() } });
+          break;
+        } catch (error) {
+          if ((error as { code?: number }).code !== 11000) throw error;
+        }
+      }
+    }
+    if (missingReferences.length > 0) {
+      console.log(`Assigned reservation reference codes to ${missingReferences.length} booking(s)`);
     }
 
     const legacySystems = await mongoose.connection

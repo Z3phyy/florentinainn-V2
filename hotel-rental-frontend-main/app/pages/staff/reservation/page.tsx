@@ -364,6 +364,9 @@ function ReservationCard({
               <User className="size-3.5 text-[#618685] shrink-0" />
               <span className="truncate">{booking.clientName}</span>
             </div>
+            {booking.referenceCode && (
+              <div className="font-mono text-[11px] text-[#5C454B] dark:text-gray-400">{booking.referenceCode}</div>
+            )}
             <div className="flex items-center gap-2 text-[#5C454B] dark:text-gray-400">
               <CalendarDays className="size-3.5 text-[#618685] shrink-0" />
               <span>

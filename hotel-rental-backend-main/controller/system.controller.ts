@@ -19,7 +19,14 @@ import { notificationTemplates } from "../utils/notificationTemplates";
 import { initSSE } from "../utils/sse";
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
-import { sendOtpEmail, sendContactInquiryEmail } from "../utils/sendEmail";
+import {
+  sendOtpEmail,
+  sendContactInquiryEmail,
+  describeEmailFailure,
+  getEmailProviderStatus,
+  getRecipientDeliveryEvents,
+} from "../utils/sendEmail";
+import crypto from "crypto";
 import {
   validatePassword,
   validateEmail,
@@ -31,6 +38,7 @@ import { AccessCodeService } from "../services/accessCode.service";
 import { LoginAttemptService } from "../services/loginAttempt.service";
 import { EMAIL_POLICY } from "../config/loginPolicy";
 import { ReservationMonitor, resolveGraceMinutes } from "../services/reservationMonitor.service";
+import { ForecastError, ForecastService } from "../services/forecast.service";
 
 // Escape user-supplied text so it is treated as a literal string, not a regex
 // pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
@@ -555,6 +563,44 @@ export class SystemController {
         updateData.gracePeriodMinutes = Math.min(1440, Math.max(1, Math.round(hours * 60)));
       }
 
+      const { securityAlertEmail, securityAlertScope } = request.body || {}
+      if (securityAlertEmail !== undefined || securityAlertScope !== undefined) {
+        const current: any = await SystemService.get()
+        const nextEmail = securityAlertEmail === undefined ? current?.securityAlertEmail || "" : String(securityAlertEmail || "").trim()
+        const nextScope = securityAlertScope === undefined ? current?.securityAlertScope || "admins" : String(securityAlertScope)
+        const changed = nextEmail !== (current?.securityAlertEmail || "") || nextScope !== (current?.securityAlertScope || "admins")
+        if (changed) {
+          if (request.account?.type !== "super admin") {
+            response.status(403).send("Only the super admin can change security alert settings.")
+            return
+          }
+          if (nextEmail && validateEmail(nextEmail)) {
+            response.status(400).send("Security alert email must be a valid email address.")
+            return
+          }
+          if (!["off", "admins", "all"].includes(nextScope)) {
+            response.status(400).send("Security alert scope must be off, admins, or all.")
+            return
+          }
+          updateData.securityAlertEmail = nextEmail
+          updateData.securityAlertScope = nextScope
+          await logAuditAction({
+            action: "SECURITY_ALERT_SETTINGS_UPDATED",
+            details: `Login alert emails: ${nextScope}${nextEmail ? ` → ${nextEmail}` : " (hotel contact email)"}`,
+            actorName: request.account?.name || "Super Admin",
+            actorRole: request.account?.type || "super admin",
+            targetType: "system",
+          })
+        }
+      }
+
+      for (const key of Object.keys(updateData)) {
+        if (updateData[key] === undefined) delete updateData[key]
+      }
+      if (updateData.systemName !== undefined && !String(updateData.systemName).trim()) {
+        response.status(400).send("Hotel name cannot be empty.")
+        return
+      }
       const system = await SystemService.update(updateData)
       response.send(system)
     } catch (error) {
@@ -644,7 +690,7 @@ export class SystemController {
         return
       }
 
-      const otp = Math.floor(1000 + Math.random() * 9000).toString()
+      const otp = crypto.randomInt(1000, 10000).toString()
 
       if (admin) {
         await AdminService.updateOtp(email, otp)
@@ -652,7 +698,16 @@ export class SystemController {
         await AccountService.updateOtp(email, otp)
       }
 
-      await sendOtpEmail({ to: email, otp })
+      try {
+        await sendOtpEmail({ to: email, otp })
+      } catch (emailError) {
+        const failure = describeEmailFailure(emailError)
+        if (admin) await AdminService.clearOtp(email)
+        else await AccountService.clearOtp(email)
+        console.log(`Failed to send OTP email: code=${failure.code}`)
+        response.status(502).send("We couldn't send the verification code right now. Please try again later or contact the front desk.")
+        return
+      }
 
       response.send("OTP sent to your email")
     } catch (error) {
@@ -813,6 +868,30 @@ export class SystemController {
     } catch (error) {
       console.log("Failed to update admin credentials: " + (error as Error).message)
       response.status(500).send("Failed to update admin credentials: " + (error as Error).message)
+    }
+  }
+
+  static emailDiagnostics = async (request: AuthRequest, response: Response) => {
+    try {
+      const provider = await getEmailProviderStatus()
+      const email = typeof request.query.email === "string" ? request.query.email.trim() : ""
+      let events: Awaited<ReturnType<typeof getRecipientDeliveryEvents>> | null = null
+      let eventsError = ""
+      if (email) {
+        if (validateEmail(email)) {
+          response.status(400).send("Please provide a valid email address.")
+          return
+        }
+        try {
+          events = await getRecipientDeliveryEvents(email, 20)
+        } catch (error) {
+          eventsError = describeEmailFailure(error).message
+        }
+      }
+      response.send({ provider, email: email || null, events, eventsError })
+    } catch (error) {
+      console.log("Failed to run email diagnostics: " + (error as Error).message)
+      response.status(500).send("Failed to run email diagnostics")
     }
   }
 
@@ -1094,7 +1173,12 @@ Return ONLY the suggested reply message text without any quotes, conversational 
 
       // 1. Dispatch Automated Email via Brevo to both Guest & Hotel Admin
       const system = await SystemService.get();
-      await sendContactInquiryEmail({
+      if (validateEmail(String(email).trim())) {
+        response.status(400).send("Please provide a valid email address.");
+        return;
+      }
+
+      const delivery = await sendContactInquiryEmail({
         guestName: name.trim(),
         guestEmail: email.trim(),
         subject: subject?.trim(),
@@ -1121,7 +1205,16 @@ Return ONLY the suggested reply message text without any quotes, conversational 
         targetType: "email",
       });
 
-      response.send({ success: true, message: "Inquiry email dispatched successfully" });
+      if (!delivery.admin.sent) {
+        console.log(`Contact inquiry admin email failed: code=${"code" in delivery.admin ? delivery.admin.code : "unknown"}`);
+      }
+      response.send({
+        success: true,
+        message: delivery.guest.sent
+          ? "Your message was sent. A confirmation email is on its way."
+          : "Your message was received by the hotel, but we couldn't send a confirmation email to your address.",
+        confirmationEmailSent: delivery.guest.sent,
+      });
     } catch (error) {
       console.error("Failed to process contact inquiry email:", error);
       response.status(500).send("Failed to send inquiry email");
@@ -1129,91 +1222,146 @@ Return ONLY the suggested reply message text without any quotes, conversational 
   };
 
   static aiForecastSuggestions = async (request: AuthRequest, response: Response) => {
+    let metrics: Awaited<ReturnType<typeof ForecastService.compute>>;
     try {
-      const {
-        forecastData,
-        baseline,
-        peakMonths,
-        slowMonths,
-        totalForecast,
-        projectedOccupancy,
-      } = request.body;
+      const params = ForecastService.parseQuery((request.body || {}) as Record<string, unknown>);
+      metrics = await ForecastService.compute(params);
+    } catch (error) {
+      if (error instanceof ForecastError) {
+        response.status(error.status).json({ message: error.message });
+        return;
+      }
+      console.error("Forecast metrics error:", error);
+      response.status(500).json({ message: "Failed to compute forecast metrics" });
+      return;
+    }
 
-      const model = getAiModel({ temperature: 0.3, maxOutputTokens: 1400 });
+    const digest = {
+      period: `${metrics.period.from} to ${metrics.period.to}`,
+      roomFilter: metrics.filters.roomCategory,
+      activeRooms: metrics.activeRooms,
+      dataQuality: metrics.dataQuality,
+      totals: metrics.totals,
+      trend: metrics.trend,
+      monthly: metrics.monthly
+        .filter((m) => !m.isFuture)
+        .map((m) => ({
+          month: m.label,
+          partial: m.isPartial,
+          bookings: m.bookings,
+          canceled: m.canceled,
+          noShow: m.noShow,
+          occupancyRate: m.occupancyRate,
+          bookedRevenue: m.bookedRevenue,
+          collectedRevenue: m.collectedRevenue,
+        })),
+      seasonality: metrics.seasonality,
+      roomPerformance: metrics.roomPerformance,
+      forecast: {
+        method: metrics.forecast.method,
+        months: metrics.forecast.months.map((m) => ({
+          month: m.label,
+          bookings: m.bookings,
+          range: `${m.low}-${m.high}`,
+          occupancyRate: m.occupancyRate,
+        })),
+      },
+    };
 
-      const prompt = `
-You are a senior hotel revenue management and hospitality operations consultant.
-Analyze the following 6-month hotel occupancy forecast and historical baseline data:
+    if (metrics.dataQuality.confidence === "insufficient") {
+      response.send({
+        status: "insufficient_data",
+        confidence: "insufficient",
+        summary: "There is not enough booking history in the selected range to produce reliable recommendations.",
+        notes: metrics.dataQuality.notes,
+        recommendations: [],
+        metricsUsed: digest,
+        generatedAt: new Date().toISOString(),
+        source: "rules",
+      });
+      return;
+    }
 
-Forecast Metrics:
-- Monthly Baseline: ${sanitizeAiText(String(baseline ?? ""), 100) || "N/A"} average bookings/month
-- 6-Month Projected Volume: ${sanitizeAiText(String(totalForecast ?? ""), 100) || "N/A"} total bookings
-- Projected Peak Surge Months: ${JSON.stringify(peakMonths || [])}
-- Projected Low Occupancy Months: ${JSON.stringify(slowMonths || [])}
-- Full 6-Month Breakdown: ${JSON.stringify(forecastData || [])}
-- Full-House / Sell-Out Risk by Month (projected occupancy % vs rooms): ${JSON.stringify(
-  projectedOccupancy || []
-)}
+    if (!process.env.GEMINI_API_KEY) {
+      response.status(503).json({ message: "AI recommendations are not configured (GEMINI_API_KEY is missing).", metricsUsed: digest });
+      return;
+    }
 
-${GROUNDING_RULES}
+    const prompt = `You are a hotel revenue-management analyst for a small inn in the Philippines (currency PHP).
+You are given metrics that the hotel's system calculated from its own database. These numbers are the only source of truth.
 
-Work ONLY from the numeric data above. Do not invent booking volumes, revenue
-figures, or occupancy rates. Provide strategic, professional recommendations
-divided into exactly these 4 categories:
-1. Dynamic Pricing Strategy (Specific percentage surge pricing, minimum stay rules for peak months, low-demand discount packages, flash sales)
-2. Staffing & Operations Plan (Housekeeping and reception shift scaling, deep cleaning, scheduled AC and room maintenance during slow periods)
-3. Marketing & Outreach Campaign (Early-bird campaigns, launch lead-times 30-45 days before peak dates, corporate weekday packages, repeat guest incentives)
-4. Inventory & Resource Planning (Linen and guest amenity pre-ordering, preventative inspections, supplies buffer)
+METRICS (JSON):
+${JSON.stringify(digest)}
 
-Respond in clean JSON format with this exact structure:
+RULES:
+- Base every statement on the metrics above. Never invent, estimate, or change numbers, dates, room types, or percentages.
+- Every recommendation must cite at least one specific metric value from the JSON in "supportingMetric".
+- Only describe a trend if the metrics show it. If a pattern is weak, or dataQuality.confidence is "low", say so explicitly.
+- Prefer insights about: occupancy changes, room-type performance differences, cancellation or no-show levels, revenue direction, seasonality, and forecast demand.
+- Do not mention guests, names, or personal data.
+- Return between 3 and 6 recommendations, most important first.
+
+Respond with ONLY a JSON object (no markdown) in exactly this shape:
 {
-  "summary": "2-sentence executive summary of the forecast outlook and primary strategic recommendation.",
-  "pricing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "staffing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "marketing": ["Recommendation 1", "Recommendation 2", "Recommendation 3"],
-  "inventory": ["Recommendation 1", "Recommendation 2", "Recommendation 3"]
-}
+  "summary": "2-3 sentences describing what the data shows and the main priority",
+  "confidenceNote": "one sentence on how much the data supports these conclusions",
+  "recommendations": [
+    {
+      "category": "pricing | operations | marketing | inventory | revenue",
+      "title": "short title",
+      "observedTrend": "what the data shows",
+      "supportingMetric": "the exact metric(s) and values used",
+      "implication": "why it matters for the business",
+      "action": "specific suggested action"
+    }
+  ]
+}`;
 
-Important: Return ONLY the JSON object. Do not include markdown code fences or backticks.
-`;
-
+    try {
+      const model = getAiModel({ temperature: 0.2, maxOutputTokens: 2048 });
       const result = await model.generateContent(prompt);
       const rawText = result.response.text().trim();
-
-      let parsed;
+      const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+      let parsed: any;
       try {
-        const cleaned = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
         parsed = JSON.parse(cleaned);
-      } catch (err) {
-        parsed = {
-          summary: "Forecast analysis generated.",
-          pricing: [
-            `Implement dynamic surge pricing (+15% to +25%) during projected peak months.`,
-            `Offer early-bird and multi-night packages during lower-occupancy periods.`,
-            `Enforce 2-night minimum stay rules on anticipated high-demand weekends.`
-          ],
-          staffing: [
-            `Scale up housekeeping and front-desk coverage by 30% during peak surge windows.`,
-            `Schedule preventative room maintenance and deep cleaning during projected slow months.`,
-            `Implement on-call shift rotations for high check-in turnaround days.`
-          ],
-          marketing: [
-            `Launch early-bird promotional campaigns 30-45 days prior to peak seasonal dates.`,
-            `Target corporate retreats and remote workers with special weekday packages.`,
-            `Send exclusive discount vouchers to past guests to boost off-peak reservations.`
-          ],
-          inventory: [
-            `Pre-order extra linens, toiletries, and supplies 3-4 weeks before peak season.`,
-            `Conduct pre-season audits of air-conditioning units, water heaters, and electronics.`
-          ]
-        };
+      } catch {
+        console.error("AI forecast returned non-JSON output");
+        response.status(502).json({ message: "The AI service returned an unreadable response. Please try again.", metricsUsed: digest });
+        return;
       }
-
-      response.send(parsed);
+      const allowedCategories = ["pricing", "operations", "marketing", "inventory", "revenue"];
+      const recommendations = (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
+        .map((r: any) => ({
+          category: allowedCategories.includes(String(r?.category).toLowerCase()) ? String(r.category).toLowerCase() : "revenue",
+          title: sanitizeAiText(String(r?.title || ""), 120),
+          observedTrend: sanitizeAiText(String(r?.observedTrend || ""), 500),
+          supportingMetric: sanitizeAiText(String(r?.supportingMetric || ""), 300),
+          implication: sanitizeAiText(String(r?.implication || ""), 500),
+          action: sanitizeAiText(String(r?.action || ""), 500),
+        }))
+        .filter((r: any) => r.title && r.action && /\d/.test(r.supportingMetric))
+        .slice(0, 6);
+      if (recommendations.length === 0) {
+        response.status(502).json({ message: "The AI response did not contain recommendations grounded in the metrics. Please try again.", metricsUsed: digest });
+        return;
+      }
+      response.send({
+        status: "ok",
+        confidence: metrics.dataQuality.confidence,
+        summary: sanitizeAiText(String(parsed?.summary || ""), 800),
+        confidenceNote: sanitizeAiText(String(parsed?.confidenceNote || ""), 400),
+        notes: metrics.dataQuality.notes,
+        recommendations,
+        metricsUsed: digest,
+        generatedAt: new Date().toISOString(),
+        source: "ai",
+      });
     } catch (error) {
-      console.error("AI forecast generation error:", error);
-      response.status(500).json({
-        message: "Failed to generate AI suggestions: " + (error as Error).message,
+      console.error("AI forecast generation error:", (error as Error).message);
+      response.status(502).json({
+        message: "The AI service is unavailable right now. The forecast figures above are still accurate; please try the recommendations again later.",
+        metricsUsed: digest,
       });
     }
   };
@@ -1435,7 +1583,7 @@ Important: Return ONLY the JSON object. Do not include markdown code fences or b
   static getNotificationPrefsStaff = SystemController.getNotificationPrefs;
 
   private static normalizePrefs(body: any) {
-    const allowedTypes = ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping"];
+    const allowedTypes = ["account", "reservation", "maintenance", "chat", "payment", "inquiry", "system", "housekeeping", "security"];
     const allowedSeverities = ["info", "success", "warning", "danger"];
     const mutedTypes = Array.isArray(body?.mutedTypes)
       ? body.mutedTypes.filter((t: unknown) => typeof t === "string" && allowedTypes.includes(t))

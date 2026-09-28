@@ -116,7 +116,7 @@ export class ReservationService {
       throw new ReservationError("The check-out date cannot be earlier than today for an in-house guest.");
     }
 
-    const targetRoom: any = roomChanged ? await RoomModel.findById(target.roomId).lean() : currentRoom;
+    const targetRoom: any = roomChanged ? await RoomModel.findOne({ _id: target.roomId, deletedAt: null }).lean() : currentRoom;
     if (!targetRoom) throw new ReservationError("The selected room no longer exists.", 404);
     if (roomChanged && targetRoom.status === "maintenance") {
       throw new ReservationError(

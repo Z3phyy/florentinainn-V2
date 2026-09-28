@@ -6,7 +6,7 @@ import { upload } from "../utils/upload";
 import { authenticateJWT, authenticateChatSender } from "../middleware/auth";
 import { requireAdmin, requireSuperAdmin, requirePermission } from "../middleware/requireAdmin";
 import { attachTokenFromQuery } from "../middleware/sseAuth";
-import { authLimiter, otpLimiter, aiLimiter } from "../config/rateLimit";
+import { authLimiter, otpLimiter, aiLimiter, contactLimiter } from "../config/rateLimit";
 
 const route = Router()
 
@@ -15,7 +15,7 @@ const superAdminAuth = [authenticateJWT, requireSuperAdmin];
 
 route.post("/ai", aiLimiter, SystemController.aiChatBot)
 route.post("/ai-suggest-reply", authenticateJWT, SystemController.aiSuggestReply)
-route.post("/ai-forecast", authenticateJWT, SystemController.aiForecastSuggestions)
+route.post("/ai-forecast", aiLimiter, adminAuth, SystemController.aiForecastSuggestions)
 route.get("/", SystemController.getSystemInfo)
 route.get("/payments", adminAuth, SystemController.getAllPayments)
 route.post("/payments/refund", authenticateJWT, requirePermission("payments"), SystemController.refundPayment)
@@ -37,6 +37,7 @@ route.put("/admin/status", superAdminAuth, SystemController.toggleAdminActive)
 route.put("/admin/access-code", superAdminAuth, SystemController.setAdminAccessCode)
 route.delete("/admin", superAdminAuth, SystemController.removeAdminAccount)
 route.get("/access-code", adminAuth, SystemController.getOwnAccessCodeStatus)
+route.get("/email/diagnostics", adminAuth, SystemController.emailDiagnostics)
 route.put("/access-code", adminAuth, SystemController.changeOwnAccessCode)
 route.put("/admin/change-credentials", adminAuth, SystemController.changeAdminCredentials)
 route.post("/forgot-password/send-otp", otpLimiter, SystemController.sendForgotPasswordOtp)
@@ -74,6 +75,6 @@ route.put("/chat/:id/status", authenticateJWT, SystemController.updateChatStatus
 route.put("/chat/:id/seen", authenticateJWT, SystemController.markChatAsSeen)
 route.delete("/chat/:id", authenticateJWT, SystemController.deleteChat)
 
-route.post("/contact", SystemController.sendContactInquiry)
+route.post("/contact", contactLimiter, SystemController.sendContactInquiry)
 
 export default route

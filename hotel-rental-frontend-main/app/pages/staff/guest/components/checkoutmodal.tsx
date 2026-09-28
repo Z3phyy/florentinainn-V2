@@ -297,6 +297,7 @@ export function CheckoutModal({ booking }: Props) {
       change: snapshot.change,
       showChange: snapshot.method === "Cash",
       cashierName: snapshot.cashierName,
+      reservationCode: booking.referenceCode,
       issuedAt: new Date().toLocaleString("en-PH", {
         year: "numeric",
         month: "short",

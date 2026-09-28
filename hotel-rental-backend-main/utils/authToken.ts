@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { getJwtSecret, getJwtSecretCandidates } from "../config/jwt";
 import { ACCESS_CODE_CHALLENGE_TTL_SECONDS } from "../config/loginPolicy";
@@ -22,6 +23,7 @@ export interface ChallengeTokenPayload {
   sv: number;
   stage: AccessCodeStage;
   purpose: typeof ACCESS_CODE_PURPOSE;
+  jti: string;
 }
 
 const secret = getJwtSecret();
@@ -56,7 +58,7 @@ export function signChallengeToken(payload: {
   sv: number;
   stage: AccessCodeStage;
 }): string {
-  return jwt.sign({ ...payload, purpose: ACCESS_CODE_PURPOSE }, secret, {
+  return jwt.sign({ ...payload, purpose: ACCESS_CODE_PURPOSE, jti: crypto.randomUUID() }, secret, {
     expiresIn: ACCESS_CODE_CHALLENGE_TTL_SECONDS,
   });
 }
@@ -68,6 +70,7 @@ export function verifyChallengeToken(token: unknown): ChallengeTokenPayload | nu
     !decoded ||
     decoded.purpose !== ACCESS_CODE_PURPOSE ||
     typeof decoded.id !== "string" ||
+    typeof decoded.jti !== "string" ||
     (decoded.stage !== "verify" && decoded.stage !== "setup") ||
     (decoded.role !== "employee" &&
       decoded.role !== "admin" &&

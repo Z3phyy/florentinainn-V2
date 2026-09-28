@@ -1,3 +1,4 @@
+import { softDeletePlugin } from "../utils/softDelete";
 import mongoose, { Schema } from "mongoose";
 
 const BookingModificationSchema = new Schema(
@@ -73,6 +74,7 @@ const BookingsSchema = new Schema({
   earlyCheckout: { type: Boolean, default: false },
   wasRescheduled: { type: Boolean, default: false },
   verificationCode: { type: String, default: "" },
+  referenceCode: { type: String },
   modificationHistory: { type: [BookingModificationSchema], default: [] },
   addOns: { type: [BookingAddOnSchema], default: [] },
   addOnsTotal: { type: Number, default: 0 },
@@ -85,7 +87,9 @@ const BookingsSchema = new Schema({
   },
 });
 
+BookingsSchema.plugin(softDeletePlugin);
 BookingsSchema.index({ room: 1, status: 1 });
+BookingsSchema.index({ referenceCode: 1 }, { unique: true, partialFilterExpression: { referenceCode: { $type: "string" } } });
 BookingsSchema.index({ "addOns.addOn": 1, status: 1 });
 
 export default mongoose.model("Bookings", BookingsSchema);

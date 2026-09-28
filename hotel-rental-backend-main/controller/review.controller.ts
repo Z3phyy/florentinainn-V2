@@ -13,10 +13,26 @@ const handle = (response: Response, error: unknown, fallback: string) => {
   response.status(500).json({ message: fallback });
 };
 
+const identityFrom = (request: AuthRequest) => ({
+  reservationCode: request.body?.reservationCode,
+  bookingId: request.body?.bookingId,
+  verificationCode: request.body?.verificationCode,
+  roomId: request.body?.roomId,
+  ip: request.ip,
+});
+
 export class ReviewController {
+  static latest = async (request: AuthRequest, response: Response) => {
+    try {
+      response.send(await ReviewService.latest(Number(request.query.limit)));
+    } catch (error) {
+      handle(response, error, "Failed to load reviews");
+    }
+  };
+
   static eligibility = async (request: AuthRequest, response: Response) => {
     try {
-      response.send(await ReviewService.eligibility(request.body?.bookingId, request.body?.verificationCode));
+      response.send(await ReviewService.eligibility(identityFrom(request)));
     } catch (error) {
       handle(response, error, "Failed to check review eligibility");
     }
@@ -25,8 +41,7 @@ export class ReviewController {
   static create = async (request: AuthRequest, response: Response) => {
     try {
       const { review, booking } = await ReviewService.create({
-        bookingId: request.body?.bookingId,
-        verificationCode: request.body?.verificationCode,
+        ...identityFrom(request),
         rating: request.body?.rating,
         comment: request.body?.comment,
       });
@@ -50,6 +65,38 @@ export class ReviewController {
       response.status(201).send(review);
     } catch (error) {
       handle(response, error, "Failed to submit review");
+    }
+  };
+
+  static listForAdmin = async (request: AuthRequest, response: Response) => {
+    try {
+      response.send(
+        await ReviewService.listForAdmin({
+          page: Number(request.query.page),
+          limit: Number(request.query.limit),
+          search: typeof request.query.search === "string" ? request.query.search : "",
+        }),
+      );
+    } catch (error) {
+      handle(response, error, "Failed to load reviews");
+    }
+  };
+
+  static archive = async (request: AuthRequest, response: Response) => {
+    try {
+      const reason = typeof request.body?.reason === "string" ? request.body.reason.trim().slice(0, 300) : "";
+      const review = await ReviewService.archive(String(request.params.id || ""), request.account?.name || "Administrator", reason);
+      await logAuditAction({
+        action: "REVIEW_ARCHIVED",
+        details: `Archived review by ${review.guestName} (${review.rating}/5)${reason ? ` — ${reason}` : ""}`,
+        actorName: request.account?.name || "Administrator",
+        actorRole: request.account?.type || "admin",
+        targetType: "review",
+        targetId: String(review._id),
+      });
+      response.send({ message: "Review archived." });
+    } catch (error) {
+      handle(response, error, "Failed to archive review");
     }
   };
 

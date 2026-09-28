@@ -414,7 +414,7 @@ function PaymentSuccessContent() {
                       : "RSV-ONLINE"}
                   </p>
                   <p className="text-[10px] font-mono font-semibold text-[#618685] mt-0.5">
-                    VERIFY CODE: {verificationCode || "—"}
+                    RESERVATION CODE: {verificationCode || "—"}
                   </p>
                 </div>
               </div>
@@ -546,7 +546,7 @@ function PaymentSuccessContent() {
 
         {bookingId && bookingInfo && (
           <div className="print:hidden">
-            <RoomReviewPanel bookingId={bookingId} verificationCode={verificationCode} />
+            <RoomReviewPanel bookingId={bookingId} reservationCode={verificationCode} />
           </div>
         )}
       </div>

@@ -13,6 +13,8 @@ const SystemSchema = new Schema({
     heroBackground: { type: String, default: "" },
     facebook: { type: String, default: "" },
     contactEmail: { type: String, default: "" },
+    securityAlertEmail: { type: String, default: "" },
+    securityAlertScope: { type: String, enum: ["off", "admins", "all"], default: "admins" },
     aboutImg1: { type: String, default: "" },
     aboutImg2: { type: String, default: "" },
     aboutImg3: { type: String, default: "" },
