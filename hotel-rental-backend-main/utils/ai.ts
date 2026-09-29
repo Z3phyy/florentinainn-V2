@@ -1,10 +1,14 @@
 import {
-  GoogleGenerativeAI,
-  HarmCategory,
+  Content,
+  FunctionCallingConfigMode,
+  FunctionDeclaration,
+  GoogleGenAI,
   HarmBlockThreshold,
-} from "@google/generative-ai";
+  HarmCategory,
+  ThinkingLevel,
+} from "@google/genai";
 
-export const AI_MODEL = "gemini-3.6-flash";
+export const AI_MODEL = "gemini-3.8-flash";
 
 // Shared, non-negotiable safety rules injected into every AI prompt. These
 // keep the LLM grounded in the hotel's own data and resistant to prompt
@@ -28,41 +32,101 @@ CRITICAL GROUNDING & SAFETY RULES — ALWAYS FOLLOW:
    staff.
 `.trim();
 
-const getSdk = () =>
-  new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+let sdk: GoogleGenAI | null = null;
+const getSdk = () => {
+  if (!sdk) sdk = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+  return sdk;
+};
 
-// Builds a Gemini model with conservative generation settings and harmful-
-// content blocks. All three AI features go through this one factory so safety
-// stays consistent and is not duplicated in each controller.
-export function getAiModel(config?: {
-  temperature?: number;
-  maxOutputTokens?: number;
-}) {
-  return getSdk().getGenerativeModel({
+const SAFETY_SETTINGS = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+].map((category) => ({
+  category,
+  threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+}));
+
+export async function generateAiText(
+  prompt: string,
+  config?: { temperature?: number; maxOutputTokens?: number },
+): Promise<string> {
+  const result = await getSdk().models.generateContent({
     model: AI_MODEL,
-    generationConfig: {
+    contents: prompt,
+    config: {
       temperature: config?.temperature ?? 0.4,
       maxOutputTokens: config?.maxOutputTokens ?? 1024,
+      safetySettings: SAFETY_SETTINGS,
     },
-    safetySettings: [
-      {
-        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-      },
-    ],
   });
+  return result.text ?? "";
+}
+
+export interface AiToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export async function generateAiWithTools(input: {
+  systemInstruction: string;
+  contents: Content[];
+  tools: FunctionDeclaration[];
+  execute: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  temperature?: number;
+  maxOutputTokens?: number;
+  maxRounds?: number;
+  maxCallsPerRound?: number;
+}): Promise<{ text: string; calls: AiToolCall[] }> {
+  const contents = [...input.contents];
+  const calls: AiToolCall[] = [];
+  const maxRounds = input.maxRounds ?? 3;
+  const maxCallsPerRound = input.maxCallsPerRound ?? 4;
+
+  for (let round = 0; round <= maxRounds; round++) {
+    const finalRound = round === maxRounds;
+    const result = await getSdk().models.generateContent({
+      model: AI_MODEL,
+      contents,
+      config: {
+        systemInstruction: input.systemInstruction,
+        temperature: input.temperature ?? 0.3,
+        maxOutputTokens: input.maxOutputTokens ?? 2048,
+        safetySettings: SAFETY_SETTINGS,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        tools: [{ functionDeclarations: input.tools }],
+        toolConfig: {
+          functionCallingConfig: {
+            mode: finalRound ? FunctionCallingConfigMode.NONE : FunctionCallingConfigMode.AUTO,
+          },
+        },
+      },
+    });
+
+    const functionCalls = finalRound ? [] : result.functionCalls || [];
+    const modelContent = result.candidates?.[0]?.content;
+    if (functionCalls.length === 0 || !modelContent) {
+      return { text: (result.text || "").trim(), calls };
+    }
+
+    contents.push(modelContent);
+    const responses = [];
+    for (const [index, call] of functionCalls.entries()) {
+      const name = call.name || "";
+      const args = (call.args || {}) as Record<string, unknown>;
+      const output =
+        index < maxCallsPerRound
+          ? await input.execute(name, args)
+          : { ok: false, error: "Too many lookups in one message. Ask the guest to narrow the request." };
+      calls.push({ name, args, result: output });
+      responses.push({ functionResponse: { id: call.id, name, response: output } });
+    }
+    contents.push({ role: "user", parts: responses });
+  }
+
+  return { text: "", calls };
 }
 
 // Strips control characters, trims, and caps untrusted text before it ever
@@ -70,17 +134,12 @@ export function getAiModel(config?: {
 export function sanitizeAiText(value: unknown, maxLength = 2000): string {
   if (typeof value !== "string") return "";
   let text = value;
-  text = text.replace(
-    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
-    "",
-  );
+  text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
   text = text.slice(0, maxLength);
   return text.trim();
 }
 
-type HistoryEntry =
-  | string
-  | { user?: unknown; message?: unknown };
+type HistoryEntry = string | { user?: unknown; message?: unknown };
 
 // Normalizes a previous-conversation array into clean text lines. Accepts both
 // plain strings (guest chatbot) and {user, message} objects (reply suggester),
@@ -103,7 +162,10 @@ export function sanitizeAiHistory(
     if (entry && typeof entry === "object") {
       const obj = entry as HistoryEntry;
       const message = sanitizeAiText(
-        typeof obj === "object" && obj && "message" in obj && obj.message != null
+        typeof obj === "object" &&
+          obj &&
+          "message" in obj &&
+          obj.message != null
           ? String(obj.message)
           : "",
         maxSegmentLength,

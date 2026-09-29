@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import Link from "next/link";
 import axiosInstance from "@/app/utils/axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,9 +23,15 @@ import {
 } from "lucide-react";
 import { playMessageChime } from "@/app/utils/sound";
 
+interface AiLink {
+  label: string;
+  href: string;
+}
+
 interface AiMessage {
   role: "user" | "ai";
   text: string;
+  links?: AiLink[];
 }
 
 interface StaffChatMessage {
@@ -101,10 +108,10 @@ export function GuestChatWidget() {
 
   // Suggested Quick Prompts for AI Concierge
   const QUICK_PROMPTS = [
-    "What are your room rates and types?",
+    "May available room ba tonight?",
+    "What are your room rates?",
     "What amenities do you provide?",
-    "Is check-in and check-out flexible?",
-    "What payment methods do you accept?",
+    "I want to check my reservation status.",
   ];
 
   // Auto-scroll on new message
@@ -168,35 +175,41 @@ export function GuestChatWidget() {
   }, [chatId, mode, open]);
 
   // ─── AI Chat Handlers ───
-  const buildAiConvo = (msgs: AiMessage[]): string[] => {
-    return msgs.map((m) => `${m.role === "user" ? "User" : "Ai"}: ${m.text}`);
-  };
 
   const handleSendAi = async (customPrompt?: string) => {
     const textToSend = (customPrompt || aiInput).trim();
     if (!textToSend || aiLoading) return;
 
     const userMsg: AiMessage = { role: "user", text: textToSend };
-    const updated = [...aiMessages, userMsg];
-    setAiMessages(updated);
+    const history = aiMessages.map((m) => ({ role: m.role, text: m.text }));
+    setAiMessages([...aiMessages, userMsg]);
     if (!customPrompt) setAiInput("");
     setAiLoading(true);
 
     try {
-      const convo = buildAiConvo(updated);
       const res = await axiosInstance.post("/system/ai", {
         input: textToSend,
-        convo,
+        history,
       });
 
-      const aiReply = res.data;
-      setAiMessages((prev) => [...prev, { role: "ai", text: aiReply }]);
-    } catch {
+      const reply = typeof res.data === "string" ? res.data : res.data?.reply;
+      const links: AiLink[] = Array.isArray(res.data?.links)
+        ? res.data.links.filter((l: AiLink) => typeof l?.href === "string" && l.href.startsWith("/"))
+        : [];
+      if (!reply) throw new Error("Empty reply");
+      setAiMessages((prev) => [...prev, { role: "ai", text: reply, links }]);
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
       setAiMessages((prev) => [
         ...prev,
         {
           role: "ai",
-          text: "I'm having a brief connection issue. You can click 'Talk to Live Receptionist' above to chat with our staff directly!",
+          text:
+            status === 429
+              ? "You've sent a lot of messages in a short time. Please wait a few minutes, or tap 'Talk to Live Staff' to chat with our front desk."
+              : status === 503
+                ? "The AI concierge is unavailable right now. Please tap 'Talk to Live Staff' to chat with our front desk."
+                : "I'm having a brief connection issue. You can click 'Talk to Live Staff' above to chat with our staff directly!",
         },
       ]);
     } finally {
@@ -449,6 +462,20 @@ export function GuestChatWidget() {
                           }`}
                         >
                           <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+                          {msg.links && msg.links.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {msg.links.map((link) => (
+                                <Link
+                                  key={link.href}
+                                  href={link.href}
+                                  className="inline-flex items-center gap-1 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-2.5 py-1 text-[10.5px] font-semibold text-[#900546] dark:text-[#F968AC] hover:bg-[#900546]/20"
+                                >
+                                  {link.label}
+                                  <ArrowRight className="size-3" />
+                                </Link>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         {msg.role === "user" && (
                           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#E4D1D1]/60 text-[#130005] mt-0.5">

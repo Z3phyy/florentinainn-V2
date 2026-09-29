@@ -1,6 +1,39 @@
 import mongoose, { Schema } from 'mongoose';
 
 
+const FaqSchema = new Schema(
+  {
+    question: { type: String, required: true },
+    answer: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const AiKnowledgeSchema = new Schema(
+  {
+    location: { type: String, default: "" },
+    contactPhone: { type: String, default: "" },
+    frontDesk: { type: String, default: "" },
+    support: { type: String, default: "" },
+    checkInPolicy: { type: String, default: "" },
+    checkOutPolicy: { type: String, default: "" },
+    bookingPolicy: { type: String, default: "" },
+    cancellationPolicy: { type: String, default: "" },
+    refundPolicy: { type: String, default: "" },
+    paymentPolicy: { type: String, default: "" },
+    idRequirements: { type: String, default: "" },
+    houseRules: { type: String, default: "" },
+    petPolicy: { type: String, default: "" },
+    smokingPolicy: { type: String, default: "" },
+    visitorPolicy: { type: String, default: "" },
+    otherPolicies: { type: String, default: "" },
+    amenities: { type: [String], default: [] },
+    faqs: { type: [FaqSchema], default: [] },
+    instructions: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
 const SystemSchema = new Schema({
     systemInfo: { type: String, required: true },
     paymentMin : { type: Number, required: true },
@@ -19,6 +52,7 @@ const SystemSchema = new Schema({
     aboutImg2: { type: String, default: "" },
     aboutImg3: { type: String, default: "" },
     aboutImg4: { type: String, default: "" },
+    aiKnowledge: { type: AiKnowledgeSchema, default: () => ({}) },
 });
 
 
