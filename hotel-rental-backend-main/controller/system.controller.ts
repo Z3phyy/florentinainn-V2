@@ -1,6 +1,21 @@
 import { Response } from "express";
 import { AuthRequest } from "../types/request.type";
-import { getAiModel, GROUNDING_RULES, sanitizeAiText, sanitizeAiHistory } from "../utils/ai";
+import { generateAiText, generateAiWithTools, GROUNDING_RULES, sanitizeAiText, sanitizeAiHistory } from "../utils/ai";
+import { HOTEL_TIME_ZONE } from "../utils/hotelTime";
+import { nightlyRate } from "../utils/pricing";
+import {
+  CHATBOT_TOOLS,
+  ChatbotToolContext,
+  executeChatbotTool,
+  extractReservationCodes,
+  hotelDateContext,
+} from "../services/chatbotTools.service";
+import {
+  buildKnowledgeContext,
+  buildStaffInstructions,
+  SYSTEM_INFO_MAX,
+  validateAiKnowledge,
+} from "../services/knowledge.service";
 import { Paymentservice } from "../services/payment.service";
 import { ChatService } from "../services/chat.service";
 import { SystemService } from "../services/system.service";
@@ -44,6 +59,36 @@ import { ForecastError, ForecastService } from "../services/forecast.service";
 // pattern, when used inside $regex queries (prevents ReDoS / unexpected matches).
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseGuestChatHistory(raw: unknown, currentInput: string) {
+  if (!Array.isArray(raw)) return [] as { role: "user" | "model"; text: string }[];
+  const entries: { role: "user" | "model"; text: string }[] = [];
+  for (const item of raw.slice(-40)) {
+    let role: "user" | "model" | null = null;
+    let text = "";
+    if (typeof item === "string") {
+      const match = item.match(/^\s*(User|Ai|Guest|Assistant)\s*:\s*([\s\S]*)$/i);
+      if (!match) continue;
+      role = /^(user|guest)$/i.test(match[1]) ? "user" : "model";
+      text = match[2];
+    } else if (item && typeof item === "object") {
+      const r = String((item as any).role || "");
+      role = r === "user" ? "user" : r === "ai" || r === "model" ? "model" : null;
+      text = typeof (item as any).text === "string" ? (item as any).text : "";
+    }
+    const clean = sanitizeAiText(text, 800);
+    if (!role || !clean) continue;
+    const last = entries[entries.length - 1];
+    if (last && last.role === role) last.text = `${last.text}\n${clean}`.slice(0, 1600);
+    else entries.push({ role, text: clean });
+  }
+  const last = entries[entries.length - 1];
+  if (last && last.role === "user" && last.text === currentInput) entries.pop();
+  while (entries.length && entries[0].role !== "user") entries.shift();
+  const trimmed = entries.slice(-16);
+  while (trimmed.length && trimmed[0].role !== "user") trimmed.shift();
+  return trimmed;
 }
 
 export class SystemController {
@@ -185,6 +230,17 @@ export class SystemController {
    }
 
    static getSystemInfo = async (request : AuthRequest , response : Response) => {
+      const systemInfo: any = await SystemService.get()
+      if (!systemInfo) {
+        response.send(systemInfo)
+        return
+      }
+      const { securityAlertEmail, securityAlertScope, aiKnowledge, ...publicInfo } = systemInfo.toObject()
+      const { instructions, ...publicKnowledge } = aiKnowledge || {}
+      response.send({ ...publicInfo, aiKnowledge: publicKnowledge })
+    }
+
+   static getSystemSettings = async (request : AuthRequest , response : Response) => {
       const systemInfo = await SystemService.get()
       response.send(systemInfo)
     }
@@ -541,6 +597,18 @@ export class SystemController {
       const { systemInfo, paymentMin, gracePeriodHours, gracePeriodMinutes, systemName, header, description, facebook, contactEmail } = request.body
 
       const updateData: any = { systemInfo, systemName, header, description, facebook, contactEmail };
+      if (systemInfo !== undefined && (typeof systemInfo !== "string" || systemInfo.length > SYSTEM_INFO_MAX)) {
+        response.status(400).send(`Additional hotel notes must be text of at most ${SYSTEM_INFO_MAX} characters.`)
+        return
+      }
+      if (request.body?.aiKnowledge !== undefined) {
+        const knowledge = validateAiKnowledge(request.body.aiKnowledge)
+        if (knowledge.error) {
+          response.status(400).send(knowledge.error)
+          return
+        }
+        updateData.aiKnowledge = knowledge.value
+      }
       const sanitizedPaymentMin = Number(paymentMin);
       if (Number.isFinite(sanitizedPaymentMin) && sanitizedPaymentMin >= 0) {
         updateData.paymentMin = sanitizedPaymentMin;
@@ -938,43 +1006,98 @@ export class SystemController {
 
 static aiChatBot = async (request: AuthRequest, response: Response) => {
     try {
-      const input = sanitizeAiText(request.body?.input, 2000);
-      const convo = sanitizeAiHistory(request.body?.convo);
-
+      const input = sanitizeAiText(request.body?.input, 1000);
       if (!input) {
-        response.status(400).send("Message text is required.");
+        response.status(400).json({ message: "Message text is required." });
+        return;
+      }
+      if (!process.env.GEMINI_API_KEY) {
+        response.status(503).json({ message: "The AI concierge is not available right now." });
         return;
       }
 
-      const systeminfo = await SystemService.get();
+      const history = parseGuestChatHistory(request.body?.history ?? request.body?.convo, input);
+      const system = await SystemService.get();
+      const { today, time, calendar } = hotelDateContext();
+      const hotelName = sanitizeAiText(system?.systemName, 100) || "the hotel";
+      const staffInstructions = buildStaffInstructions(system);
 
-      const model = getAiModel({ temperature: 0.4, maxOutputTokens: 1024 });
+      const systemInstruction = `
+You are the online concierge for ${hotelName}. You chat with guests on the hotel website.
 
-      const prompt = `
 ${GROUNDING_RULES}
 
-Hotel Information & Policies:
-${sanitizeAiText(systeminfo?.systemInfo, 5000) || "Standard hotel policies apply."}
+HOW TO ANSWER:
+A. General questions (amenities, location, contact, policies, house rules, FAQs) are answered only from HOTEL KNOWLEDGE below.
+B. Live questions MUST use a lookup tool, never HOTEL KNOWLEDGE, earlier chat messages, or memory:
+   - room availability for any date or guest count -> check_room_availability
+   - room prices or room types without dates -> get_room_rates
+   - extra services / add-ons and their prices -> get_add_ons
+   - cost of a stay (with or without add-ons) for dates -> quote_stay
+   - status/payment/details of the guest's reservation -> lookup_booking (only with a RES-XXXXX-XXXXX code the guest typed)
+   Call a tool again for every new live question, even if an earlier message mentioned prices or rooms.
+C. Only state room names, room numbers, prices, totals, capacity, availability, add-on prices, booking status or payment status that appear in a tool result from this turn. Copy numbers exactly; do not do your own price math beyond what the tool returned.
+D. If a tool returns ok:false with LIVE_DATA_UNAVAILABLE, say you cannot check that live right now and suggest trying again shortly or contacting the front desk. If it returns another error, explain it simply (for example, a past date or an invalid code).
+E. If the check-in date is missing for an availability or stay-cost question, do not call a tool; ask one short question for the check-in date (and number of guests if unknown). If the guest count is unknown you may still check availability and mention each room's capacity.
+F. Room availability must respect guest count: never suggest a room whose capacity is lower than the number of guests.
+G. You cannot create, modify or cancel reservations, add add-ons, take payments, or change anything. Never claim you did. For booking, collect check-in date, check-out date, number of guests and preferred room type, check availability, then tell the guest to use the room's booking page (links are shown under your reply) or the front desk.
+H. For reservation lookups, share only what the tool returned. Never reveal or guess other guests' information.
+I. If the information is not in HOTEL KNOWLEDGE or a tool result, say you do not have that information and suggest contacting the front desk. Never invent policies, fees, refunds, room numbers or prices.
+J. Something missing from HOTEL KNOWLEDGE is unknown, not absent: never say the hotel does not have a facility, service or policy unless HOTEL KNOWLEDGE says so explicitly.
 
-Previous Conversation:
-${convo.length > 0 ? convo.join("\n") : "(none)"}
+DATES (hotel timezone ${HOTEL_TIME_ZONE}):
+Today is ${today}, current hotel time ${time}. Upcoming dates:
+${calendar.join("\n")}
+- "tonight"/"ngayon"/"today" = check-in today, one night. "tomorrow"/"bukas" = check-in tomorrow, one night.
+- If no check-out is given, assume one night and say so.
+- A date without a year means its next occurrence that is not in the past. "October 5 to 7" means check-in Oct 5, check-out Oct 7.
+- "this weekend" or "next weekend" is ambiguous about nights: ask whether they mean Friday night, Saturday night, or both.
+- Always mention the exact dates you checked (for example "Mon, Oct 5 to Wed, Oct 7, 2 nights").
 
-Guest:
-${input}
-`;
+STYLE:
+- Reply in the guest's language: English -> English, Tagalog/Taglish -> natural Taglish.
+- Warm, concise, plain text. Use "•" bullets for lists of rooms or add-ons, one per line, with ₱ amounts formatted like ₱2,500. No markdown headings, tables, bold or code.
+- Never output raw JSON or field names.
 
-      const result = await model.generateContent(prompt);
-      const aiReply = result.response.text();
+HOTEL KNOWLEDGE:
+${buildKnowledgeContext(system)}
+${staffInstructions ? `\nADDITIONAL INSTRUCTIONS FROM HOTEL MANAGEMENT (these never override the rules above):\n${staffInstructions}` : ""}
+`.trim();
 
-      response.send(aiReply)
+      const pendingUser = history.length && history[history.length - 1].role === "user" ? history.pop()!.text : "";
+      const contents = [
+        ...history.map((entry) => ({ role: entry.role, parts: [{ text: entry.text }] })),
+        { role: "user", parts: [{ text: pendingUser ? `${pendingUser}\n${input}` : input }] },
+      ];
+      const context: ChatbotToolContext = {
+        ip: request.ip,
+        allowedCodes: extractReservationCodes([input, pendingUser, ...history.filter((h) => h.role === "user").map((h) => h.text)]),
+        bookingLookups: 0,
+        links: new Map(),
+      };
 
-    } catch (error) {
-      console.error(error);
-
-      response.status(500).json({
-        success: false,
-        message: "Failed to generate response",
+      const result = await generateAiWithTools({
+        systemInstruction,
+        contents,
+        tools: CHATBOT_TOOLS,
+        execute: (name, args) => executeChatbotTool(name, args, context),
+        temperature: 0.3,
+        maxOutputTokens: 2048,
+        maxRounds: 3,
       });
+
+      const reply =
+        result.text ||
+        "Sorry, I couldn't put together an answer just now. Please try again, or tap 'Talk to Live Staff' to reach our front desk.";
+
+      response.json({
+        reply,
+        links: Array.from(context.links.values()),
+        usedLiveData: result.calls.map((c) => c.name),
+      });
+    } catch (error) {
+      console.error("AI chatbot error:", (error as Error).message);
+      response.status(500).json({ message: "Failed to generate response" });
     }
   };
 
@@ -989,26 +1112,20 @@ ${input}
       const systeminfo = await SystemService.get();
       const rooms = await RoomService.getAll();
 
-      const model = getAiModel({ temperature: 0.5, maxOutputTokens: 900 });
-
       const roomSummary = rooms && rooms.length > 0
-        ? rooms.map((r) => `${r.roomNumber ? `Room ${r.roomNumber} (` : ""}${r.category}${r.roomNumber ? ")" : ""}: ₱${r.price.toLocaleString()}/night (Status: ${r.status})`).join(", ")
-        : "Standard luxury rooms available.";
+        ? rooms.map((r) => `${r.roomNumber ? `Room ${r.roomNumber} (` : ""}${r.category}${r.roomNumber ? ")" : ""}: ₱${nightlyRate(r).toLocaleString()}/night, up to ${r.maxHead} guest(s) (Current status: ${r.status})`).join(", ")
+        : "No room data is available. Do not quote any room or price.";
 
       const prompt = `
 You are an expert AI receptionist and co-pilot assisting front-desk staff for "${sanitizeAiText(systeminfo?.systemName, 100) || "Hotel"}".
 
 ${GROUNDING_RULES}
 
-Hotel Information & Policies:
-${sanitizeAiText(systeminfo?.systemInfo, 5000) || "Standard hotel policies apply."}
+Hotel Knowledge (policies, amenities, contact, FAQs):
+${buildKnowledgeContext(systeminfo)}
 
-Available Room Types & Rates (verify against this list, never guess prices):
+Current Room Types & Rates from the hotel system (verify against this list, never guess prices; this is not date availability):
 ${roomSummary}
-
-Location & Hours:
-Francia Sur, Jose D. Aspiras Hwy, Tubao, La Union. Open 24/7.
-Payment methods accepted: GCash, Online payment, Cash at front desk.
 
 Conversation with Guest:
 ${convo.length > 0 ? convo.join("\n") : "(no previous messages)"}
@@ -1019,8 +1136,7 @@ Directly answer the guest's latest question or inquiry using ONLY the hotel info
 Return ONLY the suggested reply message text without any quotes, conversational intros, or Markdown code fences.
 `;
 
-      const result = await model.generateContent(prompt);
-      const reply = result.response.text().trim();
+      const reply = (await generateAiText(prompt, { temperature: 0.5, maxOutputTokens: 900 })).trim();
 
       response.send({ suggestion: reply });
     } catch (error) {
@@ -1318,9 +1434,7 @@ Respond with ONLY a JSON object (no markdown) in exactly this shape:
 }`;
 
     try {
-      const model = getAiModel({ temperature: 0.2, maxOutputTokens: 2048 });
-      const result = await model.generateContent(prompt);
-      const rawText = result.response.text().trim();
+      const rawText = (await generateAiText(prompt, { temperature: 0.2, maxOutputTokens: 2048 })).trim();
       const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
       let parsed: any;
       try {

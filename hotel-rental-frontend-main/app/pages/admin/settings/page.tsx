@@ -25,6 +25,7 @@ import { AccessCodeSettings } from "./components/accessCodeSettings";
 import { AddOnManager } from "./components/addOnManager";
 import { SecurityAlertSettings } from "./components/securityAlertSettings";
 import { EmailDiagnostics } from "./components/emailDiagnostics";
+import { AiKnowledgeManager } from "./components/aiKnowledgeManager";
 import { Loader2, Save, Building2, Sparkles, Layout } from "lucide-react";
 
 type SettingsValues = z.input<typeof systemSettingsSchema>;
@@ -40,7 +41,6 @@ const formatGrace = (minutes: number) => {
 };
 
 const toFormValues = (info?: systemInterface): SettingsValues => ({
-  systemInfo: info?.systemInfo || "",
   paymentMin: info?.paymentMin?.toString() || "0",
   gracePeriodMinutes: String(
     info?.gracePeriodMinutes ??
@@ -58,9 +58,9 @@ export default function Page() {
   const { user } = useUserStore();
 
   const { data: systemInfo, isLoading, isError } = useQuery<systemInterface>({
-    queryKey: ["systeminfo"],
+    queryKey: ["systeminfo", "settings"],
     queryFn: async (): Promise<systemInterface> => {
-      const response = await axiosInstance.get("/system");
+      const response = await axiosInstance.get("/system/settings");
       return response.data;
     },
   });
@@ -86,7 +86,6 @@ export default function Page() {
 
   const updateMutation = useMutation({
     mutationFn: (data: {
-      systemInfo: string;
       paymentMin: number;
       gracePeriodMinutes: number;
       systemName: string;
@@ -255,7 +254,7 @@ export default function Page() {
                 <div>
                   <h2 className="font-serif text-lg font-bold text-[#130005] dark:text-white">Business Information</h2>
                   <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
-                    Displayed on the guest site and used by the AI Concierge assistant.
+                    Displayed on the guest site. The hotel name, description and contact email are also shared with the AI Concierge.
                   </p>
                 </div>
 
@@ -384,22 +383,6 @@ export default function Page() {
                     <FieldError message={errors.description?.message} />
                   </div>
 
-                  <div>
-                    <Label htmlFor="systemInfo" className="text-xs font-bold text-[#130005] dark:text-white">
-                      Hotel Information Knowledge Base for AI
-                    </Label>
-                    <p className="text-[10px] text-[#5C454B] dark:text-gray-400 mt-0.5">
-                      The AI Assistant refers to these exact facts when interacting with guests.
-                    </p>
-                    <Textarea
-                      id="systemInfo"
-                      rows={6}
-                      className="mt-1 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border-[#D9C3C3] text-xs leading-relaxed font-mono"
-                      aria-invalid={!!errors.systemInfo}
-                      {...register("systemInfo")}
-                    />
-                    <FieldError message={errors.systemInfo?.message} />
-                  </div>
                 </div>
               </section>
 
@@ -427,6 +410,8 @@ export default function Page() {
                 )}
               </div>
             </form>
+
+            <AiKnowledgeManager systemInfo={systemInfo} />
 
             <AccessCodeSettings />
 

@@ -173,7 +173,6 @@ export const systemSettingsSchema = z.object({
     .refine((v) => Number.isInteger(Number(v)), "Use whole minutes.")
     .refine((v) => Number(v) >= 1 && Number(v) <= 1440, "Grace period must be between 1 and 1440 minutes (24 hours)."),
   description: optionalText("Description", 1000),
-  systemInfo: optionalText("Knowledge base", 20000),
 });
 
 export const refundSchema = z.object({
@@ -360,3 +359,35 @@ export const trackBookingSchema = z
     path: ["bookingId"],
     message: "Older codes also need the 24-character booking reference from your confirmation link.",
   });
+
+export const aiKnowledgeSchema = z.object({
+  location: optionalText("Location", 300),
+  contactPhone: optionalText("Contact phone", 100),
+  frontDesk: optionalText("Front desk information", 500),
+  support: optionalText("Customer support information", 500),
+  checkInPolicy: optionalText("Check-in policy", 1500),
+  checkOutPolicy: optionalText("Check-out policy", 1500),
+  bookingPolicy: optionalText("Booking policy", 1500),
+  cancellationPolicy: optionalText("Cancellation policy", 1500),
+  refundPolicy: optionalText("Refund policy", 1500),
+  paymentPolicy: optionalText("Payment policy", 1500),
+  idRequirements: optionalText("ID requirements", 1000),
+  houseRules: optionalText("House rules", 2000),
+  petPolicy: optionalText("Pet policy", 1000),
+  smokingPolicy: optionalText("Smoking policy", 1000),
+  visitorPolicy: optionalText("Visitor policy", 1000),
+  otherPolicies: optionalText("Other policies", 3000),
+  instructions: optionalText("Assistant instructions", 2000),
+  systemInfo: optionalText("Additional notes", 20000),
+  amenities: z
+    .array(z.object({ value: requiredText("Amenity", 120) }))
+    .max(50, "At most 50 amenities are allowed."),
+  faqs: z
+    .array(
+      z.object({
+        question: requiredText("Question", 200),
+        answer: requiredText("Answer", 1000),
+      }),
+    )
+    .max(40, "At most 40 FAQs are allowed."),
+});

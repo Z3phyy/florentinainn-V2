@@ -13,7 +13,6 @@ import { AddOnError, AddOnSelection, AddOnService, parseAddOnSelection } from ".
 import { runAtomic } from "../utils/transaction";
 import { generateReferenceCode } from "../utils/referenceCode";
 import { CodeLookupError, CodeLookupService } from "../services/codeLookup.service";
-import ReviewModel from "../model/review.model";
 import { Types } from "mongoose";
 import { ReservationError, ReservationService, ModificationInput } from "../services/reservation.service";
 import { AvailabilityService } from "../services/availability.service";
@@ -390,53 +389,7 @@ export class BookingController {
         bookingId: request.body?.bookingId,
         ip: request.ip,
       });
-      const room = booking.room || {};
-      const planned = stayTotal({
-        room,
-        nights: plannedNights(booking.arrivalDate, booking.departureDate),
-        addOnsTotal: Number(booking.addOnsTotal) || 0,
-      });
-      const total = Number(booking.totalAmount) > 0 ? Number(booking.totalAmount) : planned.total;
-      const amountPaid = Number(booking.paymentAmount) || 0;
-      const reviewed = await ReviewModel.exists({ booking: booking._id }).setOptions({ withDeleted: true });
-      const nameParts = String(booking.clientName || "Guest").trim().split(/\s+/);
-      response.send({
-        reference: booking.referenceCode || "",
-        status: booking.status,
-        type: booking.type,
-        guestName:
-          nameParts.length > 1
-            ? `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0).toUpperCase()}.`
-            : nameParts[0],
-        room: {
-          label: room.roomNumber ? `Room ${room.roomNumber} · ${room.category || "Room"}` : room.category || "Room",
-          category: room.category || "",
-          image: room.image || "",
-        },
-        arrivalDate: booking.arrivalDate,
-        arrivalTime: booking.arrivalTime,
-        departureDate: booking.departureDate || "",
-        nights: planned.nights,
-        guests: booking.guests || 1,
-        roomSubtotal: planned.roomSubtotal,
-        addOns: (booking.addOns || []).map((a: any) => ({
-          name: a.name,
-          quantity: a.quantity,
-          subtotal: a.subtotal,
-        })),
-        addOnsTotal: Number(booking.addOnsTotal) || 0,
-        total,
-        amountPaid,
-        balanceDue: ["canceled", "no-show"].includes(booking.status) ? 0 : Math.max(0, total - amountPaid),
-        paymentStatus: amountPaid <= 0 ? "unpaid" : amountPaid >= total ? "paid" : "partial",
-        nonRefundable: booking.nonRefundable === true,
-        createdAt: new Types.ObjectId(String(booking._id)).getTimestamp(),
-        checkedOutAt: booking.checkedOutAt || null,
-        canceledAt: booking.canceledAt || null,
-        noShowAt: booking.noShowAt || null,
-        canReview: booking.status === "completed" && !reviewed,
-        reviewed: !!reviewed,
-      });
+      response.send(await CodeLookupService.trackingSummary(booking));
     } catch (error) {
       if (error instanceof CodeLookupError) {
         if (error.retryAfterSeconds) response.setHeader("Retry-After", String(error.retryAfterSeconds));
@@ -1946,36 +1899,32 @@ export class BookingController {
         response.status(400).json({ message: "Invalid booking id" });
         return;
       }
-      const rooms: any[] = await RoomModel.find({ deletedAt: null }).sort({ roomNumber: 1, category: 1 }).lean();
-      const result = await Promise.all(
-        rooms.map(async (room) => {
-          const conflicts = await AvailabilityService.roomConflicts(
-            String(room._id),
-            arrivalDate,
-            departureDate,
-            excludeBookingId || undefined,
-          );
-          const available = room.status !== "maintenance" && conflicts.length === 0;
-          return {
-            _id: String(room._id),
-            roomNumber: room.roomNumber || "",
-            category: room.category,
-            price: room.price,
-            discount: room.discount || 0,
-            nightlyRate: stayTotal({ room, nights: 1 }).nightlyRate,
-            maxHead: room.maxHead,
-            status: room.status,
-            image: room.image || "",
-            available,
-            reason:
-              room.status === "maintenance"
-                ? "Under maintenance"
-                : conflicts.length > 0
-                  ? `Booked ${(conflicts[0] as any).arrivalDate} → ${(conflicts[0] as any).departureDate || "open"}`
-                  : "",
-          };
-        }),
-      );
+      const [rooms, conflicts]: [any[], Map<string, any>] = await Promise.all([
+        RoomModel.find({ deletedAt: null }).sort({ roomNumber: 1, category: 1 }).lean(),
+        AvailabilityService.stayConflicts(arrivalDate, departureDate, excludeBookingId || undefined),
+      ]);
+      const result = rooms.map((room) => {
+        const conflict = conflicts.get(String(room._id));
+        const available = room.status !== "maintenance" && !conflict;
+        return {
+          _id: String(room._id),
+          roomNumber: room.roomNumber || "",
+          category: room.category,
+          price: room.price,
+          discount: room.discount || 0,
+          nightlyRate: stayTotal({ room, nights: 1 }).nightlyRate,
+          maxHead: room.maxHead,
+          status: room.status,
+          image: room.image || "",
+          available,
+          reason:
+            room.status === "maintenance"
+              ? "Under maintenance"
+              : conflict
+                ? `Booked ${conflict.arrivalDate} → ${conflict.departureDate || "open"}`
+                : "",
+        };
+      });
       response.send(result);
     } catch (error) {
       console.log("Failed to check room availability: " + (error as Error).message);

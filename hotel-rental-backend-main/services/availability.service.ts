@@ -43,6 +43,21 @@ export class AvailabilityService {
       .lean();
   }
 
+  static async stayConflicts(arrivalDate: string, departureDate: string | undefined, excludeBookingId?: string) {
+    const filter: Record<string, unknown> = overlapFilter(arrivalDate, departureDate);
+    if (excludeBookingId) filter._id = { $ne: new Types.ObjectId(excludeBookingId) };
+    const rows = await BookingsModel.find(filter)
+      .select("room arrivalDate departureDate")
+      .sort({ arrivalDate: 1 })
+      .lean();
+    const byRoom = new Map<string, { arrivalDate: string; departureDate?: string }>();
+    for (const row of rows as any[]) {
+      const key = String(row.room);
+      if (!byRoom.has(key)) byRoom.set(key, { arrivalDate: row.arrivalDate, departureDate: row.departureDate });
+    }
+    return byRoom;
+  }
+
   static async addOnUsage(
     addOnIds: string[],
     arrivalDate: string,
