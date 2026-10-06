@@ -1,0 +1,14 @@
+node_modules
+dist
+uploads
+.env
+.env.*
+.jwt-secret
+.git
+.gitignore
+.vscode
+*.log
+*.md
+seed-data.js
+Dockerfile
+.dockerignore

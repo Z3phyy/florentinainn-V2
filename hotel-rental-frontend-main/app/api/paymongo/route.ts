@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getForwardedClientHeaders, getServerBackendUrl } from "@/app/utils/backendServer";
 
 const PAYMONGO_SECRET_KEY = process.env.PAYMONGO_SECRET_KEY!;
 
@@ -61,10 +62,10 @@ export async function POST(req: Request) {
 
     try {
       await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL_LIVE}/booking/reservation/session`,
+        `${getServerBackendUrl()}/booking/reservation/session`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getForwardedClientHeaders(req) },
           body: JSON.stringify({ bookingId, sessionId, gateway: "paymongo" }),
         },
       );
