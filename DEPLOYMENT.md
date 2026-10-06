@@ -16,6 +16,16 @@ backend container  ──mongodb+srv──▶ MongoDB Atlas (external, unchanged
 - MongoDB stays on Atlas. There is no database container, no database volume, and nothing in Docker that can delete data.
 - Realtime notifications use Server-Sent Events at `/backend/system/notifications/stream`. They are not WebSockets. nginx streams them unbuffered and leaves query strings out of the logs, so JWTs are never written there.
 
+### Behind an existing nginx container (shared VPS)
+
+If another Docker app's nginx container already owns ports 80/443, do **not** install host nginx. Instead:
+
+- Set `EDGE_NETWORK` in `.env.production` to that nginx container's Docker network (e.g. `inkofbaphomet_edge`). The scripts then add `docker-compose.edge.yml`, which attaches `backend` and `frontend` to that external network as `florentina-backend` and `florentina-frontend`. Compose never creates or removes an external network.
+- Put `deploy/nginx/florentina-inn.shared-proxy.conf` into that nginx's mounted snippets folder and `include` it inside its `http { }` block.
+- The shared-proxy config looks up the upstream names at request time, so if the Florentina containers are down, only `florentinainn.site` returns 502. The other site's nginx still passes `nginx -t` and starts.
+- Certificates are issued with the `certbot/certbot` image into the other app's mounted `/etc/letsencrypt` folder, using its existing `/var/www/certbot` webroot.
+- Manual Compose commands must include both files: `docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.edge.yml ...`. The `deploy/scripts/*.sh` scripts do this automatically.
+
 ## Files
 
 | File | Purpose |
@@ -26,6 +36,8 @@ backend container  ──mongodb+srv──▶ MongoDB Atlas (external, unchanged
 | `hotel-rental-frontend-main/Dockerfile`, `.dockerignore` | Multi-stage Next.js standalone build that runs as a non-root user |
 | `deploy/nginx/florentina-inn.bootstrap.conf` | HTTP-only config used until the first certificate exists |
 | `deploy/nginx/florentina-inn.conf` | Final HTTPS config |
+| `docker-compose.edge.yml` | Optional override that joins an existing nginx container's network (`EDGE_NETWORK`) |
+| `deploy/nginx/florentina-inn.shared-proxy.conf` | Server blocks to include in an existing nginx container |
 | `deploy/scripts/deploy.sh` | Backup → pull → build → recreate → health check |
 | `deploy/scripts/rollback.sh` | Switch back to the previous images |
 | `deploy/scripts/backup-mongo.sh` | `mongodump` of Atlas into `./backups` |

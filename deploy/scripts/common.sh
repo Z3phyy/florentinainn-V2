@@ -10,7 +10,11 @@ MONGO_TOOLS_NETWORK="${MONGO_TOOLS_NETWORK:-bridge}"
 SERVICES=(backend frontend)
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  local files=(-f "$COMPOSE_FILE")
+  if [ -f "$ENV_FILE" ] && [ -n "$(read_env EDGE_NETWORK)" ]; then
+    files+=(-f "$APP_DIR/docker-compose.edge.yml")
+  fi
+  docker compose --env-file "$ENV_FILE" "${files[@]}" "$@"
 }
 
 read_env() {

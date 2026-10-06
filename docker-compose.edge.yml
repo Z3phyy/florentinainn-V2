@@ -1,0 +1,19 @@
+services:
+  backend:
+    networks:
+      internal: {}
+      edge:
+        aliases:
+          - florentina-backend
+
+  frontend:
+    networks:
+      internal: {}
+      edge:
+        aliases:
+          - florentina-frontend
+
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:?EDGE_NETWORK is required when using docker-compose.edge.yml}
