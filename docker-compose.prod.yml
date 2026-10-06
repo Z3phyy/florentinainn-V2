@@ -1,0 +1,73 @@
+name: florentina-inn
+
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  backend:
+    <<: *hardening
+    build:
+      context: ./hotel-rental-backend-main
+    image: florentina-backend:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: "5001"
+      DOTENV_CONFIG_QUIET: "true"
+      MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      FRONTEND_URL: ${PUBLIC_URL:-https://florentinainn.site}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      HOTEL_TIMEZONE: ${HOTEL_TIMEZONE:-Asia/Manila}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-}
+      EMAIL_SENDER_ADDRESS: ${EMAIL_SENDER_ADDRESS:-}
+      EMAIL_SANDBOX: ${EMAIL_SANDBOX:-false}
+      HOTEL_ADMIN_EMAIL: ${HOTEL_ADMIN_EMAIL:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      PAYMONGO_SECRET_KEY: ${PAYMONGO_SECRET_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-5001}:5001"
+    networks:
+      - internal
+
+  frontend:
+    <<: *hardening
+    build:
+      context: ./hotel-rental-frontend-main
+      args:
+        NEXT_PUBLIC_BACKEND_URL_LIVE: ${PUBLIC_URL:-https://florentinainn.site}/backend
+        NEXT_PUBLIC_BASE_URL_LIVE: ${PUBLIC_URL:-https://florentinainn.site}
+        NEXT_PUBLIC_HOTEL_TIMEZONE: ${HOTEL_TIMEZONE:-Asia/Manila}
+    image: florentina-frontend:${IMAGE_TAG:-latest}
+    environment:
+      NODE_ENV: production
+      BACKEND_INTERNAL_URL: http://backend:5001
+      PAYMONGO_SECRET_KEY: ${PAYMONGO_SECRET_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:3000"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

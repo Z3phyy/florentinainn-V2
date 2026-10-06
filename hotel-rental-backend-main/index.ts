@@ -24,7 +24,11 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173",
   "https://florentina-inn.vercel.app",
-  "https://turbo-spoon-69w7pv74qjq7h4ggj-3000.app.github.dev"
+  "https://florentinainn.site",
+  "https://turbo-spoon-69w7pv74qjq7h4ggj-3000.app.github.dev",
+  ...[process.env.FRONTEND_URL || "", ...(process.env.CORS_ORIGINS || "").split(",")]
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter(Boolean)
 ];
 
 app.set('trust proxy', 1);
@@ -115,7 +119,13 @@ mongoose.connect(mongodb_uri)
   })
   .catch((error) => {
     console.log("MongoDB connection failed: " + (error as Error).message);
+    process.exit(1);
   });
+
+app.get('/health', (request: Request, response: Response) => {
+  const database = mongoose.connection.readyState === 1 ? "connected" : "disconnected";
+  response.status(database === "connected" ? 200 : 503).json({ status: database === "connected" ? "ok" : "degraded", database });
+});
 
 app.get('/', async (request: Request, response: Response) => {
   response.send("working server...........")

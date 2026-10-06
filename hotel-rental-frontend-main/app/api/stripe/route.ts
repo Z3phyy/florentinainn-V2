@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import { getForwardedClientHeaders, getServerBackendUrl } from "@/app/utils/backendServer";
 
 
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-05-27.dahlia', // ✅ Fixed version
-});
+let stripeClient: Stripe | null = null;
+
+function getStripe() {
+  if (!stripeClient) {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: '2026-05-27.dahlia', // ✅ Fixed version
+    });
+  }
+  return stripeClient;
+}
 
 export async function POST(req: Request) {
   try {
     const { amount, bookingId } = await req.json();
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [{
         price_data: {
@@ -29,10 +37,10 @@ export async function POST(req: Request) {
 
     try {
       await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL_LIVE}/booking/reservation/session`,
+        `${getServerBackendUrl()}/booking/reservation/session`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getForwardedClientHeaders(req) },
           body: JSON.stringify({ bookingId, sessionId: session.id, gateway: "stripe" }),
         },
       );
