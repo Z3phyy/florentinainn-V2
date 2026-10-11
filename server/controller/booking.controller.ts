@@ -28,7 +28,7 @@ import { verifyOnlinePayment } from "../utils/verifyPayment";
 import { sendReservationVoucherEmail } from "../utils/sendEmail";
 import { localDateStr } from "../utils/date";
 import { daysBetweenDateStr, hotelDateStr, isValidDateStr, HOTEL_TIME_ZONE } from "../utils/hotelTime";
-import { plannedNights, stayTotal } from "../utils/pricing";
+import { billedAddOns, plannedNights, stayTotal } from "../utils/pricing";
 import {
   validateGuestName,
   validateAddress,
@@ -407,7 +407,7 @@ export class BookingController {
         arrivalDate,
         arrivalTime,
         departureDate,
-        true,
+        false,
       );
       if (validationError) {
         response.status(400).send(validationError);
@@ -824,10 +824,11 @@ export class BookingController {
       const paymentMethod = text(method) || "Cash";
 
       const nights = nightsSince(booking.arrivalDate);
+      const addOnBill = billedAddOns(booking as any, nights);
       const totalAmount = stayTotal({
         room,
         nights,
-        addOnsTotal: Number((booking as any).addOnsTotal) || 0,
+        addOnsTotal: addOnBill.total,
       }).total;
 
       const previouslyPaid = Number(booking.paymentAmount) || 0;
@@ -870,6 +871,12 @@ export class BookingController {
             paymentMethod,
             paymentRefNumber: generatedRef,
             totalAmount,
+            ...(addOnBill.repriced
+              ? {
+                  addOns: addOnBill.items.map((a) => ({ ...a, addOn: new Types.ObjectId(String(a.addOn)) })),
+                  addOnsTotal: addOnBill.total,
+                }
+              : {}),
           },
           $push: {
             modificationHistory: {
@@ -996,10 +1003,11 @@ export class BookingController {
       }
 
       const room = booking.room as any;
+      const nightsStayed = nightsSince(booking.arrivalDate);
       const totalAmount = stayTotal({
         room,
-        nights: nightsSince(booking.arrivalDate),
-        addOnsTotal: Number((booking as any).addOnsTotal) || 0,
+        nights: nightsStayed,
+        addOnsTotal: billedAddOns(booking as any, nightsStayed).total,
       }).total;
 
       const alreadyPaid = Number(booking.paymentAmount) || 0;

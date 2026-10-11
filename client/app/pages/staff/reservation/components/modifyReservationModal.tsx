@@ -42,23 +42,17 @@ import { AlertTriangle, ArrowRight, Loader2, PencilLine } from "lucide-react";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-const schema = z
-  .object({
-    roomId: z.string().min(1, "Select a room."),
-    arrivalDate: z.string().regex(DATE, "Arrival date is required."),
-    arrivalTime: z.string().regex(/^\d{2}:\d{2}$/, "Arrival time is required."),
-    departureDate: z.string().regex(DATE, "Departure date is required."),
-    guests: z
-      .string()
-      .trim()
-      .min(1, "Guest count is required.")
-      .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 20, "Use a whole number from 1 to 20."),
-    note: z.string().trim().max(300, "Note must be at most 300 characters."),
-  })
-  .refine((d) => d.departureDate > d.arrivalDate, {
-    path: ["departureDate"],
-    message: "Departure must be at least one night after arrival.",
-  });
+const schema = z.object({
+  roomId: z.string().min(1, "Select a room."),
+  arrivalDate: z.string().regex(DATE, "Arrival date is required."),
+  arrivalTime: z.string().regex(/^\d{2}:\d{2}$/, "Arrival time is required."),
+  guests: z
+    .string()
+    .trim()
+    .min(1, "Guest count is required.")
+    .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 20, "Use a whole number from 1 to 20."),
+  note: z.string().trim().max(300, "Note must be at most 300 characters."),
+});
 
 type Values = z.input<typeof schema>;
 
@@ -66,7 +60,6 @@ const FIELD_LABELS: Record<string, string> = {
   room: "Room",
   arrivalDate: "Arrival date",
   arrivalTime: "Arrival time",
-  departureDate: "Departure date",
   guests: "Guests",
   addOns: "Add-ons",
   totalAmount: "Stay total (₱)",
@@ -88,7 +81,6 @@ export function ModifyReservationModal({ booking }: { booking: bookingInterface 
     roomId: roomIdOf(booking),
     arrivalDate: booking.arrivalDate,
     arrivalTime: booking.arrivalTime,
-    departureDate: booking.departureDate || "",
     guests: String(booking.guests || 1),
     note: "",
   });
@@ -104,9 +96,9 @@ export function ModifyReservationModal({ booking }: { booking: bookingInterface 
   }, [watched]);
 
   const arrivalDate = watched.arrivalDate || "";
-  const departureDate = watched.departureDate || "";
-  const datesValid = DATE.test(arrivalDate) && DATE.test(departureDate) && departureDate > arrivalDate;
-  const nights = datesValid
+  const departureDate = booking.departureDate || "";
+  const datesValid = DATE.test(arrivalDate) && (!departureDate || departureDate > arrivalDate);
+  const nights = datesValid && departureDate
     ? Math.round((Date.UTC(...(departureDate.split("-").map(Number) as [number, number, number])) - Date.UTC(...(arrivalDate.split("-").map(Number) as [number, number, number]))) / 86400000)
     : 1;
 
@@ -147,11 +139,10 @@ export function ModifyReservationModal({ booking }: { booking: bookingInterface 
     roomId: debounced.roomId,
     arrivalDate: debounced.arrivalDate,
     arrivalTime: debounced.arrivalTime,
-    departureDate: debounced.departureDate,
     guests: Number(debounced.guests),
     addOns: selection,
   };
-  const previewEnabled = open && schema.safeParse({ ...debounced, note: "" }).success;
+  const previewEnabled = open && datesValid && schema.safeParse({ ...debounced, note: "" }).success;
 
   const preview = useQuery<modificationSummary>({
     queryKey: ["modification-preview", payload],
@@ -172,7 +163,6 @@ export function ModifyReservationModal({ booking }: { booking: bookingInterface 
         roomId: values.roomId,
         arrivalDate: values.arrivalDate,
         arrivalTime: values.arrivalTime,
-        departureDate: values.departureDate,
         guests: Number(values.guests),
         addOns: toSelection(addOnQuantities),
         note: values.note,
@@ -234,19 +224,22 @@ export function ModifyReservationModal({ booking }: { booking: bookingInterface 
         </DialogHeader>
 
         <form onSubmit={form.handleSubmit((values) => mutation.mutate(values))} className="space-y-4" noValidate>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <FormField id="mod-arrival" label="Arrival date" required error={errors.arrivalDate?.message}>
               <Input id="mod-arrival" type="date" disabled={isInHouse} aria-invalid={!!errors.arrivalDate} {...form.register("arrivalDate")} />
             </FormField>
             <FormField id="mod-time" label="Arrival time" required error={errors.arrivalTime?.message}>
               <Input id="mod-time" type="time" disabled={isInHouse} aria-invalid={!!errors.arrivalTime} {...form.register("arrivalTime")} />
             </FormField>
-            <FormField id="mod-departure" label="Departure date" required error={errors.departureDate?.message}>
-              <Input id="mod-departure" type="date" min={arrivalDate || undefined} aria-invalid={!!errors.departureDate} {...form.register("departureDate")} />
-            </FormField>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            Departure: {departureDate || "Open-ended"} · the existing departure date is kept.
+          </p>
+          {arrivalDate && departureDate && !datesValid && (
+            <p className="text-xs text-destructive">Arrival must be before the existing departure date ({departureDate}).</p>
+          )}
           {isInHouse && (
-            <p className="text-[11px] text-muted-foreground">The guest is already checked in, so only the room, departure, guests and add-ons can change.</p>
+            <p className="text-[11px] text-muted-foreground">The guest is already checked in, so only the room, guests and add-ons can change.</p>
           )}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

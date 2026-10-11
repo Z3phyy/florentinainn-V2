@@ -107,12 +107,12 @@ export class ReservationService {
       arrivalDate: target.arrivalDate,
       arrivalTime: target.arrivalTime,
       departureDate: target.departureDate,
-      requireDeparture: true,
+      requireDeparture: !!booking.departureDate,
       allowPastArrival: !arrivalChanged,
     });
     if (dateError) throw new ReservationError(dateError);
 
-    if (booking.status === "active" && target.departureDate < hotelDateStr()) {
+    if (booking.status === "active" && target.departureDate && target.departureDate < hotelDateStr()) {
       throw new ReservationError("The check-out date cannot be earlier than today for an in-house guest.");
     }
 

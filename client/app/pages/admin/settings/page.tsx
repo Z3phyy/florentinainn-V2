@@ -421,12 +421,12 @@ export default function Page() {
 
             <AddOnManager />
 
-           {(user?.type === "super admin" || user?.type === "admin") && (
-  <>
-    <AdminAccounts />
-    <BackupRestore />
-  </>
-)}
+            {user?.type === "super admin" && (
+              <>
+                <AdminAccounts />
+                <BackupRestore />
+              </>
+            )}
           </div>
         </div>
       )}

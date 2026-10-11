@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { getDaysFromDate } from "@/app/utils/customFunction";
+import { billedAddOns } from "@/app/utils/addOnPricing";
 import { successAlert, errorAlert } from "@/app/utils/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,7 @@ export function PartialPaymentModal({ booking }: Props) {
   const nights = Math.max(1, getDaysFromDate(booking.arrivalDate));
 
   const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
-  const totalBill = Math.max(0, Math.round(discountedPrice * nights) + (booking.addOnsTotal || 0));
+  const totalBill = Math.max(0, Math.round(discountedPrice * nights) + billedAddOns(booking, nights).total);
   const alreadyPaid = Math.max(0, booking.paymentAmount || 0);
   const remainingBalance = Math.max(0, totalBill - alreadyPaid);
 

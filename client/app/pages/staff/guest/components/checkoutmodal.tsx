@@ -7,6 +7,7 @@ import { bookingInterface } from "@/app/types/bookings.type";
 import { getDaysFromDate, formatTime12hr } from "@/app/utils/customFunction";
 import { successAlert, errorAlert } from "@/app/utils/alert";
 import { getApiErrorMessage } from "@/app/utils/apiError";
+import { billedAddOns } from "@/app/utils/addOnPricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -104,7 +105,8 @@ export function CheckoutModal({ booking }: Props) {
   const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
 
   // Full bill with discount applied (deposit / prior payments tracked separately)
-  const addOnsTotal = Math.max(0, booking.addOnsTotal || 0);
+  const addOnBill = billedAddOns(booking, nights);
+  const addOnsTotal = addOnBill.total;
   const totalBill = Math.max(0, Math.round(discountedPrice * nights) + addOnsTotal);
 
   // Amount already paid toward this stay (online reservation deposit, prior partials)
@@ -176,7 +178,7 @@ export function CheckoutModal({ booking }: Props) {
         roomPrice: room.price,
         nights,
         discount: room.discount || 0,
-        addOns: (booking.addOns || []).map((a) => ({ name: a.name, quantity: a.quantity, subtotal: a.subtotal })),
+        addOns: addOnBill.items.map((a) => ({ name: a.name, quantity: a.quantity, subtotal: a.subtotal })),
         downPayment: Number.isFinite(serverPrevious) ? serverPrevious : alreadyPaid,
         totalBill: Number.isFinite(serverTotal) ? serverTotal : totalBill,
         balanceDue: Number.isFinite(serverTotal) && Number.isFinite(serverPrevious)
@@ -463,7 +465,7 @@ export function CheckoutModal({ booking }: Props) {
                     </div>
                   )}
 
-                  {(booking.addOns || []).map((addOn, index) => (
+                  {addOnBill.items.map((addOn, index) => (
                     <div key={`${addOn.name}-${index}`} className="flex justify-between">
                       <span className="text-muted-foreground">
                         Add-on: {addOn.quantity}× {addOn.name}
