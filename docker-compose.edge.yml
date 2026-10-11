@@ -1,17 +1,17 @@
 services:
-  server:
+  backend:
     networks:
       internal: {}
       edge:
         aliases:
-          - florentina-server
+          - florentina-backend
 
-  client:
+  frontend:
     networks:
       internal: {}
       edge:
         aliases:
-          - florentina-client
+          - florentina-frontend
 
 networks:
   edge:
