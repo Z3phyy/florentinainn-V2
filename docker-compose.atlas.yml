@@ -1,0 +1,8 @@
+services:
+  server:
+    environment:
+      MONGODB_URI: ${ATLAS_MONGODB_URI:?set ATLAS_MONGODB_URI in .env}
+    depends_on: !reset {}
+
+  mongo:
+    profiles: [local-mongo]
