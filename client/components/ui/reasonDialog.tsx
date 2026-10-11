@@ -93,8 +93,12 @@ export function ReasonDialog({
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant="destructive" disabled={isPending}>
-              {isPending ? (
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={isPending || form.formState.isSubmitting}
+            >
+              {isPending || form.formState.isSubmitting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
                   Working...

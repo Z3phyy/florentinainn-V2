@@ -8,7 +8,6 @@ import { CheckinModal } from "./components/checkinModal";
 import { Loader2, Bed, CalendarDays, User, Hash, Sparkles, Mail, Phone, Coins } from "lucide-react";
 import { CheckoutModal } from "./components/checkoutmodal";
 import { PartialPaymentModal } from "./components/partialPaymentModal";
-import { ExtendStayModal } from "./components/extendStayModal";
 import { BookingHistoryDialog } from "../reservation/components/bookingHistoryDialog";
 import { ModifyReservationModal } from "../reservation/components/modifyReservationModal";
 
@@ -189,7 +188,6 @@ export default function Page() {
                 <div className="p-5 pt-0 space-y-2">
                   <PartialPaymentModal booking={booking} />
                   <div className="flex gap-2">
-                    <ExtendStayModal booking={booking} />
                     <ModifyReservationModal booking={booking} />
                   </div>
                   <CheckoutModal booking={booking} />

@@ -46,17 +46,8 @@ import { sendApprovalEmail, sendRejectionEmail, describeEmailFailure } from "../
 import {
   PERMISSION_VALUES,
   PERMISSION_MATRIX,
-  normalizePermission,
-  PermissionValue,
+  sanitizePermissions,
 } from "../types/permission.type";
-
-const sanitizePermissions = (value: unknown): PermissionValue[] => {
-  if (!Array.isArray(value)) return [];
-  const normalized = value
-    .map((p) => (typeof p === "string" ? normalizePermission(p) : null))
-    .filter((p): p is PermissionValue => !!p);
-  return [...new Set(normalized)];
-};
 
 const lockoutPayload = (status: LockStatus) => ({
   locked: true,
@@ -205,6 +196,9 @@ export class AccountController {
     delete plain.otpAttempts;
     delete plain.accessCodeHash;
     plain.hasAccessCode = !!plain.accessCodeUpdatedAt;
+    if (Array.isArray(plain.permisions)) {
+      plain.permisions = sanitizePermissions(plain.permisions);
+    }
     return plain;
   };
 
@@ -507,6 +501,9 @@ export class AccountController {
     delete safeAccount.otpExpiresAt;
     delete safeAccount.otpAttempts;
     delete safeAccount.accessCodeHash;
+    if (Array.isArray(safeAccount.permisions)) {
+      safeAccount.permisions = sanitizePermissions(safeAccount.permisions);
+    }
 
     response.send({
       account: safeAccount,

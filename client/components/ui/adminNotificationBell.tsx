@@ -93,7 +93,11 @@ refetchInterval: 60000,
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Element | null;
+      if (target?.closest?.('[data-slot="dialog-content"], [data-slot="dialog-overlay"]')) {
+        return;
+      }
+      if (dropdownRef.current && !dropdownRef.current.contains(target as Node)) {
         setOpen(false);
       }
     }

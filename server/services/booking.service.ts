@@ -2,6 +2,14 @@ import BookingsModel from "../model/bookings.model";
 import { bookingInterfaceInput, bookingModification, isWalkInType } from "../types/bookings.type";
 import { RoomService } from "./room.service";
 import RoomModel from "../model/room.model";
+import { createHash } from "crypto";
+
+function guestIdentity(name: string, email: string, phone: string): string {
+  const normalizedName = name.toLowerCase().replace(/\s+/g, " ");
+  const contact = email || phone.replace(/\D/g, "");
+  if (!normalizedName && !contact) return "";
+  return `${normalizedName}|${contact}`;
+}
 
 export class BookingService {
   static async getAll(options: { status?: string; search?: string } = {}) {
@@ -158,8 +166,6 @@ export class BookingService {
     }
   }
 
-  // Aggregate all bookings into a guest directory keyed by guest identity.
-  // A guest is identified by the strongest contact we have (email > phone > name).
   static async getGuestDirectory() {
     const bookings = await BookingsModel.find().populate("room").sort({ _id: -1 });
 
@@ -170,8 +176,9 @@ export class BookingService {
       const phone = (booking.clientPhone || "").trim();
       const name = (booking.clientName || "").trim();
 
-      const key = email || phone || name;
-      if (!key) continue;
+      const identity = guestIdentity(name, email, phone);
+      if (!identity) continue;
+      const key = createHash("sha1").update(identity).digest("hex");
 
       let guest = guests.get(key);
       if (!guest) {
@@ -244,8 +251,8 @@ export class BookingService {
     );
   }
 
-  static async updateGuestIdentity(
-    match: { clientEmail?: string; clientPhone?: string; clientName?: string },
+  static async updateGuestRecord(
+    bookingIds: string[],
     data: {
       clientName?: string;
       clientEmail?: string;
@@ -253,16 +260,7 @@ export class BookingService {
       clientAddress?: string;
     },
   ) {
-    const query: any = {};
-    if (match.clientEmail) {
-      query.clientEmail = {
-        $regex: `^${match.clientEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-        $options: "i",
-      };
-    } else if (match.clientPhone) query.clientPhone = match.clientPhone;
-    else if (match.clientName) query.clientName = match.clientName;
-
-    if (Object.keys(query).length === 0) return { modifiedCount: 0 };
+    if (bookingIds.length === 0) return { modifiedCount: 0 };
 
     const update: any = {};
     if (data.clientName !== undefined) update.clientName = data.clientName;
@@ -273,8 +271,10 @@ export class BookingService {
 
     if (Object.keys(update).length === 0) return { modifiedCount: 0 };
 
-    const result = await BookingsModel.updateMany(query, { $set: update });
-    return result;
+    return BookingsModel.updateMany(
+      { _id: { $in: bookingIds } },
+      { $set: update },
+    );
   }
 
   static async getHistory(options: {

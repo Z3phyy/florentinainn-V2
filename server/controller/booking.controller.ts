@@ -61,6 +61,8 @@ function validateArrivalDateTime(
   });
 }
 
+const NO_SHOW_ELIGIBLE_STATUSES: readonly string[] = ["reservation", "unpaid"];
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -338,20 +340,8 @@ export class BookingController {
         return;
       }
 
-      const match: {
-        clientEmail?: string;
-        clientPhone?: string;
-        clientName?: string;
-      } = {};
-      if (guest.email) {
-        match.clientEmail = guest.email;
-      } else if (guest.phone) {
-        match.clientPhone = guest.phone;
-      } else {
-        match.clientName = guest.name;
-      }
-
-      const result = await BookingService.updateGuestIdentity(match, {
+      const bookingIds = guest.stays.map((stay: any) => String(stay.bookingId));
+      const result = await BookingService.updateGuestRecord(bookingIds, {
         clientName,
         clientEmail,
         clientPhone,
@@ -1116,7 +1106,6 @@ export class BookingController {
         arrivalDate,
         arrivalTime,
         departureDate,
-        true,
       );
       if (validationError) {
         response.status(400).send(validationError);
@@ -1235,7 +1224,7 @@ export class BookingController {
 
       await logAuditAction({
         action: "ONLINE_RESERVATION",
-        details: `New online reservation created for guest ${clientName} for arrival on ${arrivalDate} (check-out ${departureDate}, ${guestCount} guest(s)) — non-refundable policy accepted`,
+        details: `New online reservation created for guest ${clientName} for arrival on ${arrivalDate} (check-out ${departureDate || "open-ended"}, ${guestCount} guest(s)) — non-refundable policy accepted`,
         actorName: clientName || "Guest",
         actorRole: "guest",
         targetType: "booking",
@@ -1681,7 +1670,18 @@ export class BookingController {
 
   static markNoShow = async (request: AuthRequest, response: Response) => {
     try {
-      const { bookingId, reason } = request.body;
+      const { bookingId } = request.body || {};
+      const reason = text(request.body?.reason);
+
+      if (typeof bookingId !== "string" || !/^[a-f\d]{24}$/i.test(bookingId)) {
+        response.status(400).send("A valid booking id is required");
+        return;
+      }
+
+      if (reason.length > 300) {
+        response.status(400).send("Reason must be at most 300 characters.");
+        return;
+      }
 
       const booking = await BookingService.get(bookingId);
 
@@ -1697,15 +1697,35 @@ export class BookingController {
         return;
       }
 
+      if (!NO_SHOW_ELIGIBLE_STATUSES.includes(booking.status)) {
+        response
+          .status(409)
+          .send(`This booking is already ${booking.status} and cannot be marked as no-show.`);
+        return;
+      }
+
       const account = request.account;
       const noShowBy = account?.name || "Staff";
 
-      await BookingService.updateStatus(bookingId, "no-show");
-      await BookingsModel.findByIdAndUpdate(bookingId, {
-        noShowAt: new Date(),
-        noShowBy,
-        noShowReason: reason || "",
-      });
+      const claimed = await BookingsModel.findOneAndUpdate(
+        { _id: bookingId, status: booking.status },
+        {
+          $set: {
+            status: "no-show",
+            noShowAt: new Date(),
+            noShowBy,
+            noShowReason: reason,
+          },
+        },
+        { new: true },
+      );
+
+      if (!claimed) {
+        response
+          .status(409)
+          .send("This reservation was updated by another request. Refresh the board and try again.");
+        return;
+      }
 
       await BookingService.recordModification(bookingId, {
         field: "status",

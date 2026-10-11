@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { AccountService } from "../services/acccount.service";
 import { AdminService } from "../services/admin.service";
 import { verifyAnyToken, SessionTokenPayload } from "../utils/authToken";
+import { requirePermission } from "./requireAdmin";
 
 dotenv.config();
 
@@ -168,7 +169,9 @@ export const authenticateChatSender = (
   next: NextFunction,
 ) => {
   if (request.body?.user === "staff") {
-    return authenticateJWT(request, response, next);
+    return authenticateJWT(request, response, () =>
+      requirePermission("chat management")(request, response, next),
+    );
   }
   next();
 };

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { getChatStatus, ChatStatusType } from "@/app/utils/customFunction";
 import { successAlert, errorAlert, confirmAlert } from "@/app/utils/alert";
+import { PermissionGate } from "@/components/ui/permissionGate";
 
 function getInitials(name: string): string {
   if (!name) return "??";
@@ -124,7 +125,15 @@ function getAvatarColor(name: string): string {
 
 type FilterTab = "all" | "needs_reply" | "active" | "resolved";
 
-export default function StaffChatPage() {
+export default function Page() {
+  return (
+    <PermissionGate permission="chat management">
+      <StaffChatView />
+    </PermissionGate>
+  );
+}
+
+function StaffChatView() {
   const [chats, setChats] = useState<chatInterface[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedConvo, setSelectedConvo] = useState<ChatMessage[]>([]);

@@ -17,6 +17,7 @@ import {
   UserRound,
   BookUser,
   ClipboardList,
+  SprayCan,
 } from "lucide-react";
 import { useState, useMemo } from "react";
 import useStaffNotificationSound from "@/app/hooks/useStaffNotificationSound";
@@ -40,6 +41,7 @@ import axiosInstance from "@/app/utils/axios";
 import useUserStore from "@/app/store/useUserStore";
 import { needsReply } from "@/app/utils/customFunction";
 import { StaffNotificationBell } from "@/components/ui/staffNotificationBell";
+import { hasPermission } from "@/components/ui/permissionGate";
 
 const navigationItems = [
   {
@@ -76,6 +78,12 @@ const navigationItems = [
     url: "/pages/staff/rooms",
     icon: BedDouble,
     permision: "room management",
+  },
+  {
+    title: "Housekeeping",
+    url: "/pages/staff/housekeeping",
+    icon: SprayCan,
+    permision: "housekeeping",
   },
   {
     title: "Availability",
@@ -128,6 +136,7 @@ export function StaffSidebar({ className }: AppSidebarProps) {
       const response = await axiosInstance.get("/system/chat");
       return response.data;
     },
+    enabled: hasPermission(user, "chat management"),
     refetchInterval: 4000,
   });
 

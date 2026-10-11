@@ -2,7 +2,9 @@ import { z } from "zod";
 import { validatePassword } from "./validation";
 import {
   validateAddress,
+  validateArrival,
   validateEmailFormat,
+  validateGuestCount,
   validateGuestName,
   validatePhoneFormat,
 } from "./bookingValidation";
@@ -253,6 +255,31 @@ export const guestRecordSchema = z
     path: ["phone"],
     message: "Provide at least one contact detail — an email address or a contact number.",
   });
+
+export const guestReservationSchema = (maxHead?: number) =>
+  z
+    .object({
+      clientName: fromValidator(validateGuestName),
+      clientAddress: fromValidator(validateAddress),
+      clientEmail: fromValidator(validateEmailFormat),
+      clientPhone: z.string().superRefine((value, ctx) => {
+        if (!value.trim()) return;
+        const error = validatePhoneFormat(value);
+        if (error) ctx.addIssue({ code: "custom", message: error });
+      }),
+      arrivalDate: z.string(),
+      arrivalTime: z.string(),
+      guests: fromValidator((value) => validateGuestCount(value, maxHead)),
+    })
+    .superRefine((d, ctx) => {
+      const error = validateArrival(d.arrivalDate, d.arrivalTime);
+      if (!error) return;
+      ctx.addIssue({
+        code: "custom",
+        path: [error.toLowerCase().includes("time") ? "arrivalTime" : "arrivalDate"],
+        message: error,
+      });
+    });
 
 export const ROOM_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
 export const ROOM_IMAGE_MAX_BYTES = 10 * 1024 * 1024;

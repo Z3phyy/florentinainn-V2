@@ -32,6 +32,7 @@ import { confirmAlert, errorAlert, successAlert } from "@/app/utils/alert";
 import { formatTime12hr } from "@/app/utils/customFunction";
 import { ModifyReservationModal } from "./components/modifyReservationModal";
 import { BookingHistoryDialog } from "./components/bookingHistoryDialog";
+import { ReasonDialog } from "@/components/ui/reasonDialog";
 
 export default function Page() {
   const queryClient = useQueryClient();
@@ -178,7 +179,7 @@ export default function Page() {
                 cancelMutation.mutate({ bookingId: id, reason })
               }
               onNoShow={({ id, reason }) =>
-                noShowMutation.mutate({ bookingId: id, reason })
+                noShowMutation.mutateAsync({ bookingId: id, reason })
               }
               isActivating={activateMutation.isPending}
               isCanceling={cancelMutation.isPending}
@@ -240,7 +241,7 @@ function ReservationCard({
   booking: reservationBoardItem;
   onActivate: (id: string) => void;
   onCancel: (params: { id: string; reason?: string }) => void;
-  onNoShow: (params: { id: string; reason?: string }) => void;
+  onNoShow: (params: { id: string; reason?: string }) => Promise<unknown>;
   isActivating: boolean;
   isCanceling: boolean;
   isNoShowing: boolean;
@@ -450,20 +451,31 @@ function ReservationCard({
             <XCircle className="size-4" />
             <span>Cancel</span>
           </button>
-          <button
-            onClick={() => {
-              const reason = window.prompt(
-                "Mark this reservation as no-show? Optionally enter a reason (press OK to confirm, or Cancel to abort).",
-              );
-              if (reason === null) return;
-              onNoShow({ id: booking._id, reason: reason.trim() || undefined });
-            }}
-            disabled={isActivating || isCanceling || isNoShowing}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-[#FAF5F5] dark:bg-[#25121B] border border-[#D9C3C3] dark:border-white/10 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-[#5C454B] hover:text-amber-600 text-xs font-semibold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
-          >
-            <UserX className="size-4" />
-            <span>No-Show</span>
-          </button>
+          <ReasonDialog
+            trigger={
+              <button
+                type="button"
+                disabled={isActivating || isCanceling || isNoShowing}
+                className="flex-1 flex items-center justify-center gap-1.5 bg-[#FAF5F5] dark:bg-[#25121B] border border-[#D9C3C3] dark:border-white/10 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-[#5C454B] hover:text-amber-600 text-xs font-semibold py-2.5 px-3 rounded-xl transition-all cursor-pointer"
+              >
+                <UserX className="size-4" />
+                <span>No-Show</span>
+              </button>
+            }
+            title={`Mark ${booking.clientName} as a no-show?`}
+            description="Use this when the guest did not arrive for their reservation. The booking is closed as a no-show and its room hold is released."
+            confirmLabel="Mark as No-Show"
+            reasonPlaceholder="e.g. Guest did not arrive and could not be reached"
+            warning={
+              booking.nonRefundable && Number(booking.paymentAmount) > 0
+                ? `This reservation is non-refundable. The ${peso(Number(booking.paymentAmount))} already paid will not be refunded.`
+                : undefined
+            }
+            isPending={isNoShowing}
+            onConfirm={(reason) =>
+              onNoShow({ id: booking._id, reason: reason || undefined })
+            }
+          />
         </div>
       </div>
     </div>

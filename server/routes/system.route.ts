@@ -14,12 +14,12 @@ const adminAuth = [authenticateJWT, requireAdmin];
 const superAdminAuth = [authenticateJWT, requireSuperAdmin];
 
 route.post("/ai", aiLimiter, SystemController.aiChatBot)
-route.post("/ai-suggest-reply", authenticateJWT, SystemController.aiSuggestReply)
+route.post("/ai-suggest-reply", authenticateJWT, requirePermission("chat management"), SystemController.aiSuggestReply)
 route.post("/ai-forecast", aiLimiter, adminAuth, SystemController.aiForecastSuggestions)
 route.get("/", SystemController.getSystemInfo)
 route.get("/settings", adminAuth, SystemController.getSystemSettings)
 route.get("/payments", adminAuth, SystemController.getAllPayments)
-route.post("/payments/refund", authenticateJWT, requirePermission("payments"), SystemController.refundPayment)
+route.post("/payments/refund", adminAuth, SystemController.refundPayment)
 route.post("/payments/restore", adminAuth, SystemController.restorePayment)
 route.put("/info", adminAuth, SystemController.updateSystemInfo)
 route.post("/logo", adminAuth, upload.single("logo"), SystemController.uploadLogo)
@@ -68,13 +68,13 @@ route.delete("/notifications/staff/:id", authenticateJWT, SystemController.delet
 route.delete("/notifications", adminAuth, SystemController.clearNotifications)
 route.delete("/notifications/:id", adminAuth, SystemController.deleteNotification)
 
-route.get("/chat", authenticateJWT, SystemController.getAllChats)
+route.get("/chat", authenticateJWT, requirePermission("chat management"), SystemController.getAllChats)
 route.get("/chat/:id", SystemController.getChat)
 route.post("/chat", SystemController.createChat)
 route.post("/chat/message", authenticateChatSender, SystemController.sendChatMessage)
-route.put("/chat/:id/status", authenticateJWT, SystemController.updateChatStatus)
-route.put("/chat/:id/seen", authenticateJWT, SystemController.markChatAsSeen)
-route.delete("/chat/:id", authenticateJWT, SystemController.deleteChat)
+route.put("/chat/:id/status", authenticateJWT, requirePermission("chat management"), SystemController.updateChatStatus)
+route.put("/chat/:id/seen", authenticateJWT, requirePermission("chat management"), SystemController.markChatAsSeen)
+route.delete("/chat/:id", authenticateJWT, requirePermission("chat management"), SystemController.deleteChat)
 
 route.post("/contact", contactLimiter, SystemController.sendContactInquiry)
 
