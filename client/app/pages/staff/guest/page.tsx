@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { bookingInterface } from "@/app/types/bookings.type";
 import { getDaysFromDate, formatTime12hr } from "@/app/utils/customFunction";
+import { billedAddOns } from "@/app/utils/addOnPricing";
 import { CheckinModal } from "./components/checkinModal";
 import { Loader2, Bed, CalendarDays, User, Hash, Sparkles, Mail, Phone, Coins } from "lucide-react";
 import { CheckoutModal } from "./components/checkoutmodal";
@@ -78,7 +79,7 @@ export default function Page() {
             const room = booking.room;
 
             const discountedPrice = Math.round(room.price * (1 - (room.discount || 0) / 100));
-            const stayTotal = Math.max(0, Math.round(discountedPrice * Math.max(1, daysStayed)) + (booking.addOnsTotal || 0));
+            const stayTotal = Math.max(0, Math.round(discountedPrice * Math.max(1, daysStayed)) + billedAddOns(booking, Math.max(1, daysStayed)).total);
             const amountPaid = booking.paymentAmount || 0;
             const balanceDue = Math.max(0, stayTotal - amountPaid);
 

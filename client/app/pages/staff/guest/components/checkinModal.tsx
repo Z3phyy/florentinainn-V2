@@ -5,7 +5,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/app/utils/axios";
 import { roomInterface } from "@/app/types/room.type";
 import { successAlert, errorAlert } from "@/app/utils/alert";
+import useAvailableAddOns from "@/app/hooks/useAvailableAddOns";
+import { AddOnQuantities, addOnLineTotal, peso, toSelection } from "@/app/utils/addOnPricing";
+import { addOnSelection } from "@/app/types/addOn.type";
 import { Button } from "@/components/ui/button";
+import { AddOnSelector } from "@/components/ui/addOnSelector";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,12 +32,9 @@ import {
 } from "lucide-react";
 import {
   validateBookingForm,
-  nightsBetween,
   todayDateStr,
-  addDays,
   apiErrorMessage,
   FieldErrors,
-  MAX_STAY_NIGHTS,
 } from "@/app/utils/bookingValidation";
 
 function getTodayDate() {
@@ -65,11 +66,9 @@ export function CheckinModal() {
   const [clientPhone, setClientPhone] = useState("");
   const [arrivalDate, setArivalDate] = useState(getTodayDate());
   const [arrivalTime, setArivalTime] = useState(getNextIncrementedTime(5));
-  const [departureDate, setDepartureDate] = useState(
-    addDays(getTodayDate(), 1),
-  );
   const [guests, setGuests] = useState("1");
   const [selectedRoom, setSelectedRoom] = useState("");
+  const [addOnQuantities, setAddOnQuantities] = useState<AddOnQuantities>({});
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const submitLock = useRef(false);
@@ -80,7 +79,7 @@ export function CheckinModal() {
       const today = getTodayDate();
       setArivalDate(today);
       setArivalTime(getNextIncrementedTime(5));
-      setDepartureDate(addDays(today, 1));
+      setAddOnQuantities({});
       setErrors({});
       setSubmitted(false);
       submitLock.current = false;
@@ -109,7 +108,6 @@ export function CheckinModal() {
       clientPhone,
       arrivalDate,
       arrivalTime,
-      departureDate,
       guests,
     }),
     [
@@ -119,7 +117,6 @@ export function CheckinModal() {
       clientPhone,
       arrivalDate,
       arrivalTime,
-      departureDate,
       guests,
     ],
   );
@@ -134,7 +131,40 @@ export function CheckinModal() {
   }, [formValues, selectedRoomDoc?.maxHead, selectedRoom]);
 
   const visibleErrors = submitted ? liveErrors : errors;
-  const nights = nightsBetween(arrivalDate, departureDate);
+
+  const addOnsQuery = useAvailableAddOns(arrivalDate, "", open);
+  const addOnOptions = useMemo(() => addOnsQuery.data || [], [addOnsQuery.data]);
+  const selectedExtras = addOnOptions
+    .filter((addOn) => (addOnQuantities[addOn._id] || 0) > 0)
+    .map((addOn) => {
+      const quantity = addOnQuantities[addOn._id];
+      return { addOn, quantity, subtotal: addOnLineTotal(addOn, quantity, 1) };
+    });
+  const extrasTotal = selectedExtras.reduce((sum, item) => sum + item.subtotal, 0);
+  const hasPerNightExtras = selectedExtras.some((item) => item.addOn.pricingUnit === "per_night");
+  const selectedRoomRate = selectedRoomDoc
+    ? selectedRoomDoc.discount > 0
+      ? Math.round(selectedRoomDoc.price * (1 - selectedRoomDoc.discount / 100))
+      : selectedRoomDoc.price
+    : 0;
+
+  const extrasError = useMemo(() => {
+    for (const [id, quantity] of Object.entries(addOnQuantities)) {
+      if (quantity <= 0) continue;
+      const addOn = addOnOptions.find((o) => o._id === id);
+      if (!addOn || !addOn.isActive) return "One of the selected extra services is no longer available.";
+      if (!Number.isInteger(quantity) || quantity > addOn.maxPerBooking) {
+        return `You can add at most ${addOn.maxPerBooking} × ${addOn.name}.`;
+      }
+      if (addOn.remaining !== null && addOn.remaining !== undefined && quantity > addOn.remaining) {
+        return addOn.remaining === 0
+          ? `${addOn.name} is fully booked.`
+          : `Only ${addOn.remaining} × ${addOn.name} left.`;
+      }
+      if (!(addOn.price >= 0)) return `${addOn.name} has an invalid price.`;
+    }
+    return "";
+  }, [addOnQuantities, addOnOptions]);
 
   const createBookingMutation = useMutation({
     mutationFn: (data: {
@@ -145,10 +175,10 @@ export function CheckinModal() {
       type: string;
       status: string;
       arrivalDate: string;
-      departureDate: string;
       arrivalTime: string;
       guests: number;
       room: string;
+      addOns: addOnSelection[];
     }) => axiosInstance.post("/booking", data),
     onSuccess: () => {
       successAlert("Guest checked in successfully.");
@@ -161,6 +191,7 @@ export function CheckinModal() {
     },
     onError: (err: unknown) => {
       errorAlert(apiErrorMessage(err, "Failed to check in guest."));
+      queryClient.invalidateQueries({ queryKey: ["addons"] });
       submitLock.current = false;
     },
   });
@@ -172,9 +203,9 @@ export function CheckinModal() {
     setClientPhone("");
     setArivalDate(getTodayDate());
     setArivalTime(getNextIncrementedTime(5));
-    setDepartureDate(addDays(getTodayDate(), 1));
     setGuests("1");
     setSelectedRoom("");
+    setAddOnQuantities({});
     setErrors({});
     setSubmitted(false);
   };
@@ -190,9 +221,6 @@ export function CheckinModal() {
       ) {
         setArivalTime(getNextIncrementedTime(5));
       }
-    }
-    if (!departureDate || nightsBetween(newDate, departureDate) < 1) {
-      setDepartureDate(addDays(newDate, 1));
     }
   };
 
@@ -222,6 +250,11 @@ export function CheckinModal() {
       return;
     }
 
+    if (extrasError) {
+      errorAlert(extrasError);
+      return;
+    }
+
     submitLock.current = true;
 
     try {
@@ -247,10 +280,10 @@ export function CheckinModal() {
       type: "walk in",
       status: "active",
       arrivalDate,
-      departureDate,
       arrivalTime,
       guests: Number(guests),
       room: selectedRoom,
+      addOns: toSelection(addOnQuantities),
     });
   };
 
@@ -379,28 +412,6 @@ export function CheckinModal() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="departureDate">
-                Check-out Date <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="departureDate"
-                type="date"
-                min={addDays(arrivalDate || getTodayDate(), 1)}
-                value={departureDate}
-                onChange={(e) => setDepartureDate(e.target.value)}
-                aria-invalid={!!visibleErrors.departureDate}
-              />
-              {visibleErrors.departureDate ? (
-                <FieldError message={visibleErrors.departureDate} />
-              ) : (
-                <p className="text-[10px] text-muted-foreground">
-                  {nights > 0
-                    ? `${nights} night${nights === 1 ? "" : "s"} (max ${MAX_STAY_NIGHTS})`
-                    : "Must be at least one night after check-in"}
-                </p>
-              )}
-            </div>
             <div className="space-y-2">
               <Label htmlFor="guests">
                 Number of Guests <span className="text-destructive">*</span>
@@ -590,6 +601,61 @@ export function CheckinModal() {
             )}
 
             <FieldError message={visibleErrors.room} />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Extra Services</Label>
+              <span className="text-xs text-muted-foreground">Optional · charged separately from the room rate</span>
+            </div>
+            <AddOnSelector
+              options={addOnOptions}
+              value={addOnQuantities}
+              onChange={setAddOnQuantities}
+              nights={1}
+              isLoading={addOnsQuery.isLoading}
+              isError={addOnsQuery.isError}
+              disabled={createBookingMutation.isPending}
+            />
+            {extrasError && <FieldError message={extrasError} />}
+
+            {selectedExtras.length > 0 && (
+              <div className="rounded-lg border border-border p-3 space-y-2 text-xs">
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 gap-y-1">
+                  <span className="font-semibold text-muted-foreground">Service</span>
+                  <span className="font-semibold text-muted-foreground text-right">Unit price</span>
+                  <span className="font-semibold text-muted-foreground text-right">Qty</span>
+                  <span className="font-semibold text-muted-foreground text-right">Subtotal</span>
+                  {selectedExtras.map(({ addOn, quantity, subtotal }) => (
+                    <div key={addOn._id} className="contents">
+                      <span>{addOn.name}</span>
+                      <span className="text-right tabular-nums">
+                        {peso(addOn.price)}
+                        {addOn.pricingUnit === "per_night" ? "/night" : ""}
+                      </span>
+                      <span className="text-right tabular-nums">{quantity}</span>
+                      <span className="text-right tabular-nums">{peso(subtotal)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between border-t border-border pt-2 font-semibold">
+                  <span>Extra services total</span>
+                  <span className="tabular-nums">{peso(extrasTotal)}</span>
+                </div>
+                {selectedRoomDoc && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Room rate (separate)</span>
+                    <span className="tabular-nums">{peso(selectedRoomRate)} / night</span>
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground">
+                  {hasPerNightExtras
+                    ? "Per-night services are shown for one night and billed for each night stayed at checkout. "
+                    : ""}
+                  Final prices are confirmed by the server. Extras are added to the guest&apos;s balance and are not marked as paid.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="pt-2">

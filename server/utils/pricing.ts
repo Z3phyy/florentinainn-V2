@@ -41,6 +41,28 @@ export function repriceAddOns<T extends { unitPrice: number; quantity: number; p
   }));
 }
 
+export function billedAddOns(
+  booking: { departureDate?: string | null; addOns?: any[] | null; addOnsTotal?: number | null },
+  nightsStayed: number,
+): { items: PricedAddOn[]; total: number; repriced: boolean } {
+  const stored: PricedAddOn[] = (booking.addOns || []).map((item: any) => ({
+    addOn: String(item.addOn?._id ?? item.addOn),
+    name: item.name,
+    unitPrice: Number(item.unitPrice) || 0,
+    quantity: Number(item.quantity) || 0,
+    pricingUnit: item.pricingUnit,
+    nights: Number(item.nights) || 1,
+    subtotal: Number(item.subtotal) || 0,
+  }));
+  const openEnded = !booking.departureDate;
+  const hasPerNight = stored.some((item) => item.pricingUnit === "per_night");
+  if (!openEnded || !hasPerNight) {
+    return { items: stored, total: Math.round(Number(booking.addOnsTotal) || 0), repriced: false };
+  }
+  const items = repriceAddOns(stored, nightsStayed);
+  return { items, total: sumAddOns(items), repriced: true };
+}
+
 export function stayTotal(input: {
   room: { price?: number; discount?: number } | null | undefined;
   nights: number;

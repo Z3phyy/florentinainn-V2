@@ -195,7 +195,7 @@ export interface BookingFormValues {
   clientPhone: string;
   arrivalDate: string;
   arrivalTime: string;
-  departureDate: string;
+  departureDate?: string;
   guests: string | number;
 }
 
@@ -244,11 +244,13 @@ export function validateBookingForm(
     else errors.arrivalDate = arrivalError;
   }
 
-  const departureError = validateDeparture(
-    values.arrivalDate,
-    values.departureDate,
-  );
-  if (departureError) errors.departureDate = departureError;
+  if (values.departureDate !== undefined) {
+    const departureError = validateDeparture(
+      values.arrivalDate,
+      values.departureDate,
+    );
+    if (departureError) errors.departureDate = departureError;
+  }
 
   const guestError = validateGuestCount(values.guests, rules.maxHead);
   if (guestError) errors.guests = guestError;
