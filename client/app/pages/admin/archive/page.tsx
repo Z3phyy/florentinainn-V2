@@ -43,13 +43,13 @@ const RESTORE_NOTES: Record<archiveType, string> = {
 function Pager({ page, totalPages, onChange, total }: { page: number; totalPages: number; total: number; onChange: (p: number) => void }) {
   if (total === 0) return null;
   return (
-    <div className="flex items-center justify-between">
-      <p className="text-xs text-muted-foreground">{total} record{total === 1 ? "" : "s"}</p>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-sm text-muted-foreground">{total} record{total === 1 ? "" : "s"}</p>
       <div className="flex items-center gap-2">
         <Button variant="outline" size="icon-sm" disabled={page <= 1} onClick={() => onChange(page - 1)} aria-label="Previous page">
           <ChevronLeft className="size-4" />
         </Button>
-        <span className="text-xs text-muted-foreground">Page {page} / {totalPages}</span>
+        <span className="text-sm text-muted-foreground">Page {page} / {totalPages}</span>
         <Button variant="outline" size="icon-sm" disabled={page >= totalPages} onClick={() => onChange(page + 1)} aria-label="Next page">
           <ChevronRight className="size-4" />
         </Button>
@@ -112,7 +112,7 @@ function ArchivedList({ type }: { type: archiveType }) {
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border py-12 text-center">
           <Archive className="size-7 text-muted-foreground/60" />
           <p className="mt-2 text-sm font-medium">Nothing archived here</p>
-          <p className="text-xs text-muted-foreground">{debounced ? "No archived records match your search." : "Archived records will appear here."}</p>
+          <p className="text-[13px] text-muted-foreground">{debounced ? "No archived records match your search." : "Archived records will appear here."}</p>
         </div>
       ) : (
         <div className={`overflow-x-auto rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] ${isFetching ? "opacity-70" : ""}`}>
@@ -131,15 +131,15 @@ function ArchivedList({ type }: { type: archiveType }) {
                 <TableRow key={item._id}>
                   <TableCell className="min-w-[200px]">
                     <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-[11px] text-muted-foreground break-words">{item.detail}</p>
+                    <p className="text-[13px] text-muted-foreground break-words">{item.detail}</p>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-xs">{formatHotelDateTime(item.deletedAt)}</TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">{formatHotelDateTime(item.deletedAt)}</TableCell>
+                  <TableCell className="text-sm">
                     {item.deletedBy || "—"}
-                    {item.deleteReason ? <span className="block text-[11px] text-muted-foreground">{item.deleteReason}</span> : null}
+                    {item.deleteReason ? <span className="block text-[13px] text-muted-foreground">{item.deleteReason}</span> : null}
                   </TableCell>
                   <TableCell>
-                    <span className="inline-flex rounded-full border border-gray-500/30 bg-gray-500/10 px-2 py-0.5 text-[11px] font-medium text-gray-600">Archived</span>
+                    <span className="inline-flex rounded-full border border-gray-500/30 bg-gray-500/10 px-2.5 py-0.5 text-[13px] font-medium text-gray-600 dark:text-gray-300">Archived</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -201,7 +201,7 @@ function ReviewModeration() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold">{review.guestName}</span>
               <StarRating value={review.rating} readOnly size="sm" />
-              <span className="text-[11px] text-muted-foreground">{review.roomLabel} · {formatHotelDateTime(review.createdAt)}</span>
+              <span className="text-[13px] text-muted-foreground">{review.roomLabel} · {formatHotelDateTime(review.createdAt)}</span>
             </div>
             <p className="text-sm text-[#5C454B] dark:text-gray-300 break-words">{review.comment}</p>
           </div>
@@ -239,7 +239,7 @@ export default function Page() {
           Records & Recovery
         </div>
         <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">Archive</h1>
-        <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 max-w-2xl">
+        <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1 max-w-2xl">
           Deleted rooms, reservations, reviews and staff accounts are archived instead of erased, so history stays intact. Payments and audit logs are never deleted.
         </p>
       </div>
@@ -251,7 +251,7 @@ export default function Page() {
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition-colors ${
+            className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors ${
               tab === t.id
                 ? "border-[#900546] bg-[#900546] text-white"
                 : "border-[#D9C3C3] dark:border-white/10 text-[#5C454B] dark:text-gray-300 hover:border-[#900546]/50"

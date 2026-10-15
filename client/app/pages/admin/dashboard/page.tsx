@@ -140,7 +140,7 @@ function OccupancyGauge({ rate }: { rate: number }) {
         <span className="font-serif text-lg font-bold text-[#130005] dark:text-white leading-none">
           {rate.toFixed(0)}%
         </span>
-        <span className="text-[9px] uppercase tracking-wider text-[#5C454B] dark:text-gray-400 font-semibold mt-0.5">
+        <span className="text-[11px] uppercase tracking-wider text-[#5C454B] dark:text-gray-400 font-semibold mt-0.5">
           Occupied
         </span>
       </div>
@@ -173,7 +173,7 @@ function StatCard({
         </div>
         {badgeText && (
           <span
-            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${badgeColor}`}
+            className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${badgeColor}`}
           >
             {badgeText}
           </span>
@@ -181,14 +181,14 @@ function StatCard({
       </div>
 
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">
+        <p className="text-xs font-bold uppercase tracking-wider text-[#5C454B] dark:text-gray-400">
           {label}
         </p>
         <p className="font-serif text-2xl sm:text-3xl font-bold text-[#130005] dark:text-white mt-0.5 tracking-tight">
           {value}
         </p>
         {subtext && (
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1 flex items-center gap-1 truncate">
+          <p className="text-[13px] text-[#5C454B] dark:text-gray-400 mt-1 flex items-center gap-1 truncate">
             {subtext}
           </p>
         )}
@@ -218,7 +218,7 @@ function ChartCard({
             {title}
           </h3>
           {subtitle && (
-            <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+            <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-0.5">
               {subtitle}
             </p>
           )}
@@ -235,12 +235,12 @@ function ChartCard({
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white/95 dark:bg-[#130005]/95 backdrop-blur-md px-3.5 py-2.5 text-xs shadow-xl space-y-1">
+    <div className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white/95 dark:bg-[#130005]/95 backdrop-blur-md px-3.5 py-2.5 text-sm shadow-xl space-y-1">
       <p className="font-bold text-[#130005] dark:text-white">{label}</p>
       {payload.map((entry: any, i: number) => (
         <p
           key={i}
-          className="flex items-center gap-2 text-[11px] font-semibold"
+          className="flex items-center gap-2 text-[13px] font-semibold"
           style={{ color: entry.color || "#900546" }}
         >
           <span
@@ -513,7 +513,7 @@ export default function Page() {
           <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
             Hotel Analytics & Performance
           </h1>
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
             Real-time occupancy rates, RevPAR metrics, revenue trends, and
             operational capacity.
           </p>
@@ -521,14 +521,14 @@ export default function Page() {
 
         {/* Dynamic Period Dropdown */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[#5C454B] dark:text-gray-400 font-semibold">
+          <span className="text-sm text-[#5C454B] dark:text-gray-400 font-semibold whitespace-nowrap">
             Filter Period:
           </span>
           <Select
             value={dateRange}
             onValueChange={(val: DateRangePreset) => setDateRange(val)}
           >
-            <SelectTrigger className="w-[180px] h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] dark:border-white/10 text-xs font-semibold text-[#130005] dark:text-white focus:ring-[#900546]">
+            <SelectTrigger className="w-[180px] h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] dark:border-white/10 text-sm font-semibold text-[#130005] dark:text-white focus:ring-[#900546]">
               <SelectValue placeholder="Select Range" />
             </SelectTrigger>
             <SelectContent className="rounded-xl border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13]">
@@ -652,7 +652,7 @@ export default function Page() {
                 title="Revenue Trend & Collections"
                 subtitle={`Daily cash & online intake for ${periodLabel}`}
                 action={
-                  <span className="text-xs font-bold text-[#900546] bg-[#900546]/10 px-3 py-1 rounded-full border border-[#900546]/20">
+                  <span className="text-[13px] font-bold text-[#900546] bg-[#900546]/10 px-3 py-1 rounded-full border border-[#900546]/20">
                     Total: {formatCurrency(totalRevenue)}
                   </span>
                 }
@@ -722,7 +722,7 @@ export default function Page() {
                       <p className="text-sm font-semibold text-[#130005] dark:text-white">
                         No Revenue in Selected Period
                       </p>
-                      <p className="text-xs mt-0.5">
+                      <p className="text-[13px] mt-0.5">
                         Switch the filter range above to view historical
                         transactions.
                       </p>
@@ -742,7 +742,7 @@ export default function Page() {
                   <OccupancyGauge rate={occupancyRateNumber} />
 
                   {/* Room Breakdown Stats */}
-                  <div className="w-full space-y-2.5 text-xs">
+                  <div className="w-full space-y-2.5 text-sm">
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10">
                       <span className="flex items-center gap-2 font-medium text-[#5C454B] dark:text-gray-300">
                         <span className="size-2.5 rounded-full bg-emerald-500" />
@@ -818,7 +818,7 @@ export default function Page() {
                           verticalAlign="bottom"
                           height={30}
                           formatter={(value) => (
-                            <span className="text-xs font-medium text-[#5C454B] dark:text-gray-300">
+                            <span className="text-[13px] font-medium text-[#5C454B] dark:text-gray-300">
                               {value}
                             </span>
                           )}
@@ -826,7 +826,7 @@ export default function Page() {
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-xs text-[#5C454B]">
+                    <div className="flex flex-col items-center justify-center h-full text-sm text-[#5C454B]">
                       No room inventory records found.
                     </div>
                   )}
@@ -883,7 +883,7 @@ export default function Page() {
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-xs text-[#5C454B]">
+                    <div className="flex flex-col items-center justify-center h-full text-sm text-[#5C454B]">
                       No bookings recorded in this range.
                     </div>
                   )}
@@ -902,7 +902,7 @@ export default function Page() {
               >
                 <div className="space-y-3">
                   {recentTransactions.length === 0 ? (
-                    <p className="text-xs text-[#5C454B] py-6 text-center">
+                    <p className="text-sm text-[#5C454B] py-6 text-center">
                       No recent payment transactions.
                     </p>
                   ) : (
@@ -912,23 +912,23 @@ export default function Page() {
                         className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10 hover:border-[#900546]/40 transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="size-9 rounded-xl bg-[#900546]/10 text-[#900546] dark:text-[#F968AC] flex items-center justify-center font-bold text-xs">
+                          <div className="size-9 rounded-xl bg-[#900546]/10 text-[#900546] dark:text-[#F968AC] flex items-center justify-center font-bold text-sm">
                             {p.method?.charAt(0).toUpperCase() || "P"}
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-[#130005] dark:text-white">
+                            <p className="text-sm font-bold text-[#130005] dark:text-white">
                               {p.paymentBy}
                             </p>
-                            <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
+                            <p className="text-[13px] text-[#5C454B] dark:text-gray-400">
                               Ref: {p.refNumber} · {p.method || "Cash"}
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <p className="font-serif text-sm font-bold text-[#900546] dark:text-[#F968AC]">
+                          <p className="font-serif text-base font-bold text-[#900546] dark:text-[#F968AC]">
                             {formatCurrency(p.amount)}
                           </p>
-                          <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
+                          <p className="text-[13px] text-[#5C454B] dark:text-gray-400">
                             {formatDate(p.date)}
                           </p>
                         </div>
@@ -947,7 +947,7 @@ export default function Page() {
               >
                 <div className="space-y-3">
                   {recentBookings.length === 0 ? (
-                    <p className="text-xs text-[#5C454B] py-6 text-center">
+                    <p className="text-sm text-[#5C454B] py-6 text-center">
                       No recent guest reservations.
                     </p>
                   ) : (
@@ -957,16 +957,16 @@ export default function Page() {
                         className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FAF5F5] dark:bg-[#130005] border border-[#D9C3C3] dark:border-white/10"
                       >
                         <div>
-                          <p className="text-xs font-bold text-[#130005] dark:text-white">
+                          <p className="text-sm font-bold text-[#130005] dark:text-white">
                             {b.clientName}
                           </p>
-                          <p className="text-[10px] text-[#5C454B] dark:text-gray-400">
+                          <p className="text-[13px] text-[#5C454B] dark:text-gray-400">
                             {b.room ? `${b.room.category}` : "Suite"} ·{" "}
                             {b.arrivalDate}
                           </p>
                         </div>
                         <span
-                          className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
                             b.status === "completed"
                               ? "bg-emerald-500/10 text-emerald-700 border-emerald-300"
                               : b.status === "occupied" || b.status === "active"

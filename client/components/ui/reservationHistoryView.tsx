@@ -103,7 +103,7 @@ const formatDateTime = (value?: string | null) => {
 function Badge({ map, value }: { map: Record<string, { label: string; cls: string }>; value: string }) {
   const badge = map[value] || { label: value, cls: "border-border text-muted-foreground" };
   return (
-    <span className={`inline-flex whitespace-nowrap items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${badge.cls}`}>
+    <span className={`inline-flex whitespace-nowrap items-center rounded-full border px-2.5 py-0.5 text-[13px] font-medium ${badge.cls}`}>
       {badge.label}
     </span>
   );
@@ -198,7 +198,7 @@ export function ReservationHistoryView() {
         <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
           Reservation History
         </h1>
-        <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-1">
+        <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
           Review every reservation and walk-in stay, including payments, status changes, and the staff involved.
         </p>
       </div>
@@ -206,7 +206,7 @@ export function ReservationHistoryView() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {summary.map((s) => (
           <div key={s.label} className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#5C454B] dark:text-gray-400">{s.label}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#5C454B] dark:text-gray-400">{s.label}</p>
             <div className="mt-1 text-2xl font-bold tabular-nums text-[#130005] dark:text-white">
               {isLoading ? <Skeleton className="h-7 w-10" /> : s.value.toLocaleString()}
             </div>
@@ -258,16 +258,16 @@ export function ReservationHistoryView() {
             </SelectContent>
           </Select>
           <div className="space-y-1">
-            <Label htmlFor="history-from" className="text-[11px] text-muted-foreground">Arrival from</Label>
+            <Label htmlFor="history-from" className="text-[13px] text-muted-foreground">Arrival from</Label>
             <Input id="history-from" type="date" value={from} max={to || undefined} onChange={(e) => withReset(setFrom)(e.target.value)} aria-invalid={!!dateError} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="history-to" className="text-[11px] text-muted-foreground">Arrival to</Label>
+            <Label htmlFor="history-to" className="text-[13px] text-muted-foreground">Arrival to</Label>
             <Input id="history-to" type="date" value={to} min={from || undefined} onChange={(e) => withReset(setTo)(e.target.value)} aria-invalid={!!dateError} />
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {dateError ? <p className="text-xs font-medium text-destructive">{dateError}</p> : <span />}
+          {dateError ? <p className="text-[13px] font-medium text-destructive">{dateError}</p> : <span />}
           {hasFilters && (
             <Button variant="ghost" size="sm" onClick={resetFilters}>
               <RotateCcw className="size-3.5" />
@@ -301,7 +301,7 @@ export function ReservationHistoryView() {
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border py-16 text-center">
           <History className="size-8 text-muted-foreground/60" />
           <p className="mt-2 text-sm font-medium">No reservations found</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {hasFilters ? "Try adjusting or resetting the filters." : "Reservations will appear here once guests book."}
           </p>
         </div>
@@ -326,22 +326,22 @@ export function ReservationHistoryView() {
               {items.map((item: reservationHistoryItem) => (
                 <TableRow key={item.bookingId}>
                   <TableCell>
-                    <p className="font-mono text-xs font-semibold">{item.reference}</p>
-                    <p className="text-[11px] capitalize text-muted-foreground">{item.type === "walk-in" ? "walk in" : item.type}</p>
+                    <p className="font-mono text-[13px] font-semibold">{item.reference}</p>
+                    <p className="text-[13px] capitalize text-muted-foreground">{item.type === "walk-in" ? "walk in" : item.type}</p>
                   </TableCell>
-                  <TableCell className="min-w-[160px]">
+                  <TableCell className="min-w-[180px]">
                     <p className="text-sm font-medium">{item.clientName}</p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[13px] text-muted-foreground">
                       {[item.clientEmail, item.clientPhone].filter(Boolean).join(" · ") || "—"}
                     </p>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-xs">
+                  <TableCell className="whitespace-nowrap text-sm">
                     {item.room?.roomNumber ? `Room ${item.room.roomNumber}` : "—"}
-                    <span className="block text-[11px] text-muted-foreground">{item.room?.category || ""}</span>
+                    <span className="block text-[13px] text-muted-foreground">{item.room?.category || ""}</span>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-xs">
+                  <TableCell className="whitespace-nowrap text-sm">
                     {formatDate(item.arrivalDate)} → {formatDate(item.departureDate || null)}
-                    <span className="block text-[11px] text-muted-foreground">
+                    <span className="block text-[13px] text-muted-foreground">
                       {item.nights} night{item.nights === 1 ? "" : "s"}
                       {item.checkedOutAt ? ` · out ${formatDateTime(item.checkedOutAt)}` : ""}
                       {item.earlyCheckout ? " · early" : ""}
@@ -350,34 +350,34 @@ export function ReservationHistoryView() {
                   <TableCell>
                     <Badge map={STATUS_BADGES} value={item.status} />
                     {item.cancellationReason ? (
-                      <p className="mt-1 max-w-[160px] truncate text-[11px] text-muted-foreground" title={item.cancellationReason}>
+                      <p className="mt-1 max-w-[180px] truncate text-[13px] text-muted-foreground" title={item.cancellationReason}>
                         {item.cancellationReason}
                       </p>
                     ) : null}
                   </TableCell>
                   <TableCell>
                     <Badge map={PAYMENT_BADGES} value={item.paymentStatus} />
-                    <p className="mt-1 text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-[13px] text-muted-foreground">
                       {item.paymentMethod || "—"}
                       {item.paymentRefNumber ? ` · ${item.paymentRefNumber}` : ""}
                     </p>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
+                  <TableCell className="whitespace-nowrap text-right text-sm tabular-nums">
                     <p className="font-semibold">{peso(item.billTotal)}</p>
                     {(item.addOnsTotal || 0) > 0 ? (
-                      <p className="text-[11px] text-muted-foreground" title={(item.addOns || []).map((a) => `${a.quantity}× ${a.name}`).join(", ")}>
+                      <p className="text-[13px] text-muted-foreground" title={(item.addOns || []).map((a) => `${a.quantity}× ${a.name}`).join(", ")}>
                         incl. add-ons {peso(item.addOnsTotal || 0)}
                       </p>
                     ) : null}
-                    <p className="text-[11px] text-muted-foreground">Paid {peso(item.amountPaid)}</p>
+                    <p className="text-[13px] text-muted-foreground">Paid {peso(item.amountPaid)}</p>
                     {item.balance > 0 && !["canceled", "no-show"].includes(item.status) ? (
-                      <p className="text-[11px] text-amber-700">Due {peso(item.balance)}</p>
+                      <p className="text-[13px] text-amber-700">Due {peso(item.balance)}</p>
                     ) : null}
                   </TableCell>
-                  <TableCell className="text-xs">
+                  <TableCell className="text-sm">
                     {item.handledBy?.length ? item.handledBy.join(", ") : <span className="text-muted-foreground">Guest / online</span>}
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-[13px] text-muted-foreground">
                     <p>{formatDateTime(item.createdAt)}</p>
                     <p>{formatDateTime(item.updatedAt)}</p>
                   </TableCell>
@@ -409,14 +409,14 @@ export function ReservationHistoryView() {
 
       {!isLoading && !isError && items.length > 0 && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Showing {(page - 1) * PAGE_SIZE + 1}–{(page - 1) * PAGE_SIZE + items.length} of {data?.total ?? 0} records
           </p>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="icon-sm" disabled={page <= 1 || isFetching} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page">
               <ChevronLeft className="size-4" />
             </Button>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               Page {page} / {totalPages}
             </span>
             <Button variant="outline" size="icon-sm" disabled={page >= totalPages || isFetching} onClick={() => setPage((p) => p + 1)} aria-label="Next page">

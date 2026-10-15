@@ -481,7 +481,7 @@ export default function Page() {
           <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
             Payment Records & Folio
           </h1>
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
             Audit transactions, filter payment channels, and generate printable
             guest receipts or export raw CSV ledgers.
           </p>
@@ -494,7 +494,7 @@ export default function Page() {
               variant="outline"
               size="sm"
               onClick={resetFilters}
-              className="gap-1.5 text-xs h-9"
+              className="gap-1.5 text-sm h-9"
             >
               <X className="size-3.5" />
               <span>Reset Filters</span>
@@ -504,7 +504,7 @@ export default function Page() {
           <Button
             onClick={exportToCSV}
             disabled={filteredPayments.length === 0}
-            className="gap-2 text-xs h-9 bg-[#900546] hover:bg-[#720336] text-white shadow-xs rounded-xl cursor-pointer"
+            className="gap-2 text-sm h-9 bg-[#900546] hover:bg-[#720336] text-white shadow-xs rounded-xl cursor-pointer"
           >
             <Download className="size-3.5" />
             <span>Export CSV</span>
@@ -514,7 +514,7 @@ export default function Page() {
             onClick={exportToPDF}
             disabled={filteredPayments.length === 0}
             variant="outline"
-            className="gap-2 text-xs h-9 rounded-xl cursor-pointer border-[#618685]/30 text-[#618685] hover:bg-[#618685]/10"
+            className="gap-2 text-sm h-9 rounded-xl cursor-pointer border-[#618685]/30 text-[#618685] hover:bg-[#618685]/10"
           >
             <FileSpreadsheet className="size-3.5" />
             <span>Export PDF</span>
@@ -536,7 +536,7 @@ export default function Page() {
           <p className="text-2xl font-bold text-foreground mt-2">
             {formatCurrency(metrics.totalRevenue)}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Across {metrics.count} recorded transaction
             {metrics.count !== 1 ? "s" : ""}
           </p>
@@ -554,7 +554,7 @@ export default function Page() {
           <p className="text-2xl font-bold text-foreground mt-2">
             {metrics.count}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Matching current active filters
           </p>
         </div>
@@ -571,7 +571,7 @@ export default function Page() {
           <p className="text-2xl font-bold text-foreground mt-2">
             {formatCurrency(metrics.avgTicket)}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Average transaction spend
           </p>
         </div>
@@ -588,7 +588,7 @@ export default function Page() {
               value={searchQuery}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search by Guest Name, Cashier / Staff, Reference No., or Payment ID..."
-              className="pl-10 pr-9 h-10 text-xs bg-muted/30 border-border focus:bg-background rounded-lg"
+              className="pl-10 pr-9 h-10 text-sm bg-muted/30 border-border focus:bg-background rounded-lg"
             />
             {searchQuery && (
               <button
@@ -609,7 +609,7 @@ export default function Page() {
                 setCurrentPage(1);
               }}
             >
-              <SelectTrigger className="h-10 text-xs bg-muted/30 border-border">
+              <SelectTrigger className="h-10 text-sm bg-muted/30 border-border">
                 <div className="flex items-center gap-2">
                   <ArrowUpDown className="size-3.5 text-muted-foreground shrink-0" />
                   <SelectValue placeholder="Sort by" />
@@ -628,7 +628,7 @@ export default function Page() {
         {/* Date Filter Tabs & Custom Inputs */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-border/60">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-muted-foreground mr-1 flex items-center gap-1">
+            <span className="text-[13px] font-semibold text-muted-foreground mr-1 flex items-center gap-1">
               <Calendar className="size-3" />
               Date:
             </span>
@@ -647,7 +647,7 @@ export default function Page() {
                   setDatePreset(preset.id);
                   setCurrentPage(1);
                 }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all ${
                   datePreset === preset.id
                     ? "bg-primary text-primary-foreground shadow-xs font-semibold"
                     : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -668,9 +668,9 @@ export default function Page() {
                   setStartDate(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="h-8 text-xs w-[130px] bg-muted/30"
+                className="h-9 text-sm w-[150px] bg-muted/30"
               />
-              <span className="text-xs text-muted-foreground">to</span>
+              <span className="text-sm text-muted-foreground">to</span>
               <Input
                 type="date"
                 value={endDate}
@@ -678,7 +678,7 @@ export default function Page() {
                   setEndDate(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="h-8 text-xs w-[130px] bg-muted/30"
+                className="h-9 text-sm w-[150px] bg-muted/30"
               />
             </div>
           )}
@@ -686,7 +686,7 @@ export default function Page() {
 
         {/* Payment Method Filter Chips */}
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60">
-          <span className="text-[11px] font-semibold text-muted-foreground mr-1">
+          <span className="text-[13px] font-semibold text-muted-foreground mr-1">
             Method:
           </span>
 
@@ -695,14 +695,14 @@ export default function Page() {
               setMethodFilter("all");
               setCurrentPage(1);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium transition-all border ${
               methodFilter === "all"
                 ? "bg-primary/10 text-primary border-primary/30 font-semibold"
                 : "border-border/60 bg-card text-muted-foreground hover:text-foreground"
             }`}
           >
             <span>All Methods</span>
-            <span className="text-[10px] opacity-70">({methodCounts.all})</span>
+            <span className="text-xs opacity-70">({methodCounts.all})</span>
           </button>
 
           <button
@@ -710,7 +710,7 @@ export default function Page() {
               setMethodFilter("cash");
               setCurrentPage(1);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium transition-all border ${
               methodFilter === "cash"
                 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-semibold"
                 : "border-border/60 bg-card text-muted-foreground hover:text-emerald-600"
@@ -718,7 +718,7 @@ export default function Page() {
           >
             <Banknote className="size-3 text-emerald-600" />
             <span>Cash</span>
-            <span className="text-[10px] opacity-70">
+            <span className="text-xs opacity-70">
               ({methodCounts.cash})
             </span>
           </button>
@@ -728,7 +728,7 @@ export default function Page() {
               setMethodFilter("gcash");
               setCurrentPage(1);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium transition-all border ${
               methodFilter === "gcash"
                 ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30 font-semibold"
                 : "border-border/60 bg-card text-muted-foreground hover:text-blue-600"
@@ -736,7 +736,7 @@ export default function Page() {
           >
             <Smartphone className="size-3 text-blue-600" />
             <span>GCash</span>
-            <span className="text-[10px] opacity-70">
+            <span className="text-xs opacity-70">
               ({methodCounts.gcash})
             </span>
           </button>
@@ -746,7 +746,7 @@ export default function Page() {
               setMethodFilter("online");
               setCurrentPage(1);
             }}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[13px] font-medium transition-all border ${
               methodFilter === "online"
                 ? "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30 font-semibold"
                 : "border-border/60 bg-card text-muted-foreground hover:text-purple-600"
@@ -754,7 +754,7 @@ export default function Page() {
           >
             <Globe className="size-3 text-purple-600" />
             <span>Online Payment</span>
-            <span className="text-[10px] opacity-70">
+            <span className="text-xs opacity-70">
               ({methodCounts.online})
             </span>
           </button>
@@ -778,7 +778,7 @@ export default function Page() {
           <h3 className="text-base font-semibold text-foreground">
             Failed to load payments
           </h3>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Could not fetch payment records. Please try again.
           </p>
         </div>
@@ -792,7 +792,7 @@ export default function Page() {
           <h3 className="text-base font-semibold text-foreground">
             No payments recorded yet
           </h3>
-          <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
+          <p className="text-sm text-muted-foreground mt-1 max-w-[300px]">
             Payments will appear automatically when guests reserve or check in.
           </p>
         </div>
@@ -806,10 +806,10 @@ export default function Page() {
             <div className="size-12 rounded-full bg-muted/60 flex items-center justify-center mb-3">
               <Search className="size-6 text-muted-foreground/60" />
             </div>
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 className="text-base font-semibold text-foreground">
               No matching payments found
             </h3>
-            <p className="text-xs text-muted-foreground mt-1 max-w-[300px]">
+            <p className="text-sm text-muted-foreground mt-1 max-w-[320px]">
               Try adjusting your search keywords, payment method, or date range
               filters.
             </p>
@@ -817,7 +817,7 @@ export default function Page() {
               variant="outline"
               size="sm"
               onClick={resetFilters}
-              className="mt-4 text-xs"
+              className="mt-4 text-sm"
             >
               Clear Filters
             </Button>
@@ -831,31 +831,31 @@ export default function Page() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="w-[120px] text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[120px] text-[13px] font-semibold uppercase tracking-wide">
                     Date
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[150px] text-[13px] font-semibold uppercase tracking-wide">
                     Reference No.
                   </TableHead>
-                  <TableHead className="w-[110px] text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[110px] text-[13px] font-semibold uppercase tracking-wide">
                     Folio
                   </TableHead>
-                  <TableHead className="text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="text-[13px] font-semibold uppercase tracking-wide">
                     Guest (Payment By)
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[150px] text-[13px] font-semibold uppercase tracking-wide">
                     Method
                   </TableHead>
-                  <TableHead className="w-[150px] text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[150px] text-[13px] font-semibold uppercase tracking-wide">
                     Received By
                   </TableHead>
-                  <TableHead className="w-[130px] text-right text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[130px] text-right text-[13px] font-semibold uppercase tracking-wide">
                     Amount
                   </TableHead>
-                  <TableHead className="w-[130px] text-right text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[130px] text-right text-[13px] font-semibold uppercase tracking-wide">
                     Balance
                   </TableHead>
-                  <TableHead className="w-[120px] text-center text-xs font-semibold uppercase tracking-wider">
+                  <TableHead className="w-[190px] text-center text-[13px] font-semibold uppercase tracking-wide">
                     Receipt
                   </TableHead>
                 </TableRow>
@@ -873,28 +873,28 @@ export default function Page() {
                       className="hover:bg-muted/30 transition-colors"
                     >
                       {/* Date */}
-                      <TableCell className="text-xs font-medium whitespace-nowrap">
+                      <TableCell className="text-sm font-medium whitespace-nowrap">
                         {formatHotelDate(paymentTimestamp(payment))}
                         {payment.createdAt ? (
-                          <span className="block text-[10px] font-normal text-muted-foreground">
+                          <span className="block text-[13px] font-normal text-muted-foreground">
                             {formatHotelTime(payment.createdAt)}
                           </span>
                         ) : null}
                       </TableCell>
 
                       {/* Reference No. */}
-                      <TableCell className="text-[11px] font-mono text-muted-foreground whitespace-nowrap font-semibold">
+                      <TableCell className="text-[13px] font-mono text-muted-foreground whitespace-nowrap font-semibold">
                         {displayRef}
                       </TableCell>
 
                       {/* Folio */}
-                      <TableCell className="text-[11px] font-mono text-muted-foreground whitespace-nowrap font-semibold">
+                      <TableCell className="text-[13px] font-mono text-muted-foreground whitespace-nowrap font-semibold">
                         {payment.folio || "—"}
                       </TableCell>
 
                       {/* Guest Name */}
                       <TableCell>
-                        <span className="text-xs font-semibold text-foreground">
+                        <span className="text-sm font-semibold text-foreground">
                           {payment.paymentBy || "Guest"}
                         </span>
                       </TableCell>
@@ -902,21 +902,21 @@ export default function Page() {
                       {/* Method Badge */}
                       <TableCell>
                         {resolvedMethod.type === "cash" && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <Banknote className="size-3 shrink-0" />
                             <span>Cash</span>
                           </span>
                         )}
 
                         {resolvedMethod.type === "gcash" && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
                             <Smartphone className="size-3 shrink-0" />
                             <span>GCash</span>
                           </span>
                         )}
 
                         {resolvedMethod.type === "online" && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
                             <Globe className="size-3 shrink-0" />
                             <span>Online</span>
                           </span>
@@ -924,7 +924,7 @@ export default function Page() {
 
                         {payment.status === "refunded" && (
                           <span
-                            className="ml-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
+                            className="ml-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[13px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
                             title={payment.refundReason || "Refunded payment"}
                           >
                             <RotateCcw className="size-3 shrink-0" />
@@ -934,13 +934,13 @@ export default function Page() {
                       </TableCell>
 
                       {/* Cashier / Received By */}
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {payment.receivedBy || "Front Desk"}
                       </TableCell>
 
                       {/* Amount */}
                       <TableCell className="text-right">
-                        <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                        <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
                           {formatCurrency(payment.amount)}
                         </span>
                       </TableCell>
@@ -948,11 +948,11 @@ export default function Page() {
                       {/* Balance */}
                       <TableCell className="text-right">
                         {Number(payment.balance || 0) > 0 ? (
-                          <span className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                          <span className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
                             {formatCurrency(Number(payment.balance || 0))}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-sm text-muted-foreground">
                             —
                           </span>
                         )}
@@ -965,7 +965,7 @@ export default function Page() {
                             variant="outline"
                             size="sm"
                             onClick={() => setSelectedPayment(payment)}
-                            className="h-7 px-2 text-[11px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
+                            className="h-8 px-2.5 text-[13px] gap-1 font-medium hover:text-primary hover:border-primary/40 shadow-none"
                             title="View & Download Official Receipt"
                           >
                             <Download className="size-3 text-primary" />
@@ -982,7 +982,7 @@ export default function Page() {
           </div>
 
           {/* ── Pagination Footer ── */}
-          <div className="border-t border-border px-4 py-3 bg-muted/15 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+          <div className="border-t border-border px-4 py-3 bg-muted/15 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted-foreground">
             {/* Rows Per Page */}
             <div className="flex items-center gap-2">
               <span>Rows per page:</span>
@@ -993,7 +993,7 @@ export default function Page() {
                   setCurrentPage(1);
                 }}
               >
-                <SelectTrigger className="h-7 w-[70px] text-xs bg-card">
+                <SelectTrigger className="h-8 w-[76px] text-sm bg-card">
                   <SelectValue placeholder={String(pageSize)} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1024,7 +1024,7 @@ export default function Page() {
                 size="icon"
                 onClick={() => setCurrentPage(1)}
                 disabled={validCurrentPage <= 1}
-                className="size-7"
+                className="size-8"
                 title="First Page"
               >
                 <ChevronsLeft className="size-3.5" />
@@ -1035,13 +1035,13 @@ export default function Page() {
                 size="icon"
                 onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
                 disabled={validCurrentPage <= 1}
-                className="size-7"
+                className="size-8"
                 title="Previous Page"
               >
                 <ChevronLeft className="size-3.5" />
               </Button>
 
-              <span className="px-2.5 text-xs font-semibold text-foreground">
+              <span className="px-2.5 text-sm font-semibold text-foreground">
                 Page {validCurrentPage} of {totalPages}
               </span>
 
@@ -1052,7 +1052,7 @@ export default function Page() {
                   setCurrentPage((prev) => Math.min(totalPages, prev + 1))
                 }
                 disabled={validCurrentPage >= totalPages}
-                className="size-7"
+                className="size-8"
                 title="Next Page"
               >
                 <ChevronRight className="size-3.5" />
@@ -1063,7 +1063,7 @@ export default function Page() {
                 size="icon"
                 onClick={() => setCurrentPage(totalPages)}
                 disabled={validCurrentPage >= totalPages}
-                className="size-7"
+                className="size-8"
                 title="Last Page"
               >
                 <ChevronsRight className="size-3.5" />
@@ -1087,7 +1087,7 @@ export default function Page() {
                 <Receipt className="size-5 text-primary" />
                 Receipt Preview
               </DialogTitle>
-              <DialogDescription className="text-xs">
+              <DialogDescription className="text-sm">
                 Review the official receipt for {selectedPayment.paymentBy}{" "}
                 before downloading.
               </DialogDescription>
@@ -1103,7 +1103,7 @@ export default function Page() {
                 />
               </div>
 
-              <p className="text-[11px] text-muted-foreground text-center">
+              <p className="text-[13px] text-muted-foreground text-center">
                 The downloaded PDF uses exactly this receipt layout.
               </p>
 
@@ -1115,7 +1115,7 @@ export default function Page() {
                   size="sm"
                   onClick={handleDownloadReceipt}
                   disabled={isDownloadingReceipt}
-                  className="text-xs gap-1.5 cursor-pointer"
+                  className="text-sm gap-1.5 cursor-pointer"
                 >
                   {isDownloadingReceipt ? (
                     <Loader2 className="size-3.5 animate-spin text-primary" />
@@ -1130,7 +1130,7 @@ export default function Page() {
                   size="sm"
                   variant="secondary"
                   onClick={() => setSelectedPayment(null)}
-                  className="text-xs cursor-pointer"
+                  className="text-sm cursor-pointer"
                 >
                   Close
                 </Button>

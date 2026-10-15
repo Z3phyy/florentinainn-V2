@@ -7,7 +7,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import axiosInstance from "@/app/utils/axios";
 import useAvailableAddOns from "@/app/hooks/useAvailableAddOns";
-import { AddOnQuantities, addOnLineTotal, addOnsEstimate, peso, toSelection } from "@/app/utils/addOnPricing";
+import {
+  AddOnQuantities,
+  addOnLineTotal,
+  addOnsEstimate,
+  peso,
+  toSelection,
+} from "@/app/utils/addOnPricing";
 import { AddOnSelector } from "@/components/ui/addOnSelector";
 import { roomInterface } from "@/app/types/room.type";
 import { errorAlert } from "@/app/utils/alert";
@@ -133,7 +139,8 @@ export function CheckinModal({
   const addOnsTotal = addOnsEstimate(addOnOptions, addOnQuantities, 1);
   const estimatedTotal = nightlyRate + addOnsTotal;
   const configuredDeposit = Number(systemInfo?.paymentMin || 0);
-  const depositDue = configuredDeposit > 0 ? Math.min(configuredDeposit, estimatedTotal) : 0;
+  const depositDue =
+    configuredDeposit > 0 ? Math.min(configuredDeposit, estimatedTotal) : 0;
 
   const handleArrivalDateChange = (newDate: string) => {
     if (newDate === getTodayDate()) {
@@ -529,22 +536,34 @@ export function CheckinModal({
             {addOnOptions
               .filter((addOn) => (addOnQuantities[addOn._id] || 0) > 0)
               .map((addOn) => (
-                <div key={addOn._id} className="flex items-center justify-between">
+                <div
+                  key={addOn._id}
+                  className="flex items-center justify-between"
+                >
                   <span className="text-[#5C454B] dark:text-gray-400">
                     {addOnQuantities[addOn._id]}× {addOn.name}
                     {addOn.pricingUnit === "per_night" ? " × 1 night" : ""}
                   </span>
                   <span className="font-semibold text-[#130005] dark:text-white">
-                    {peso(addOnLineTotal(addOn, addOnQuantities[addOn._id] || 0, 1))}
+                    {peso(
+                      addOnLineTotal(addOn, addOnQuantities[addOn._id] || 0, 1),
+                    )}
                   </span>
                 </div>
               ))}
             <div className="flex items-center justify-between border-t border-[#D9C3C3] dark:border-white/10 pt-1.5">
-              <span className="font-semibold text-[#130005] dark:text-white">Estimated first-night total</span>
-              <span className="font-bold text-[#130005] dark:text-white">{peso(estimatedTotal)}</span>
+              <span className="font-semibold text-[#130005] dark:text-white">
+                Estimated first-night total
+              </span>
+              <span className="font-bold text-[#130005] dark:text-white">
+                {peso(estimatedTotal)}
+              </span>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Final prices are confirmed by the hotel system when you continue. Your check-out date is arranged with the front desk, and any additional nights and the remaining balance are settled when you check out.
+              Final prices are confirmed by the hotel system when you continue.
+              Your check-out date is arranged with the front desk, and any
+              additional nights and the remaining balance are settled when you
+              check out.
             </p>
             {depositDue > 0 && (
               <div className="flex items-center justify-between border-t border-[#D9C3C3] dark:border-white/10 pt-1.5">
@@ -649,26 +668,27 @@ export function CheckinModal({
           </div>
 
           {/* ── Policy acknowledgement (required before reserving) ── */}
-          <div className="flex items-start gap-3 rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#25121B] p-4">
+          <div className="flex w-full min-w-0 items-start gap-3 rounded-2xl border border-[#D9C3C3] bg-white p-3 text-left dark:border-white/10 dark:bg-[#25121B] sm:p-4">
             <Checkbox
               id="policyAccepted"
               checked={policyAccepted}
               onCheckedChange={(checked) => setPolicyAccepted(checked === true)}
-              className="mt-0.5"
+              className="mt-0.5 shrink-0"
             />
+
             <Label
               htmlFor="policyAccepted"
-              className="text-xs font-medium leading-relaxed text-[#130005] dark:text-gray-200 cursor-pointer"
+              className="block min-w-0 flex-1 cursor-pointer text-left text-xs font-medium leading-relaxed text-[#130005] dark:text-gray-200 sm:text-sm"
+              style={{ textAlign: "left", overflowWrap: "anywhere" }}
             >
               I have read and agree that this online reservation and the amount
               I pay now are{" "}
-              <strong className="text-[#900546] dark:text-[#F968AC]">
+              <span className="inline whitespace-normal text-left text-[#900546] dark:text-[#F968AC]">
                 non-refundable
-              </strong>
+              </span>
               , and that no refund will be issued if I cancel or do not show up.
             </Label>
           </div>
-
           <DialogFooter className="pt-2">
             <Button
               type="submit"

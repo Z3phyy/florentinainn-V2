@@ -120,7 +120,7 @@ export function HousekeepingBoard() {
         <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
           Housekeeping Workflow
         </h1>
-        <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+        <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
           Track the room cleaning cycle: dirty → cleaning → clean → inspected → out-of-service.
         </p>
       </div>
@@ -133,7 +133,7 @@ export function HousekeepingBoard() {
             className="rounded-2xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-4 text-center shadow-xs"
           >
             <p className={`text-2xl font-bold ${card.tone}`}>{card.value}</p>
-            <p className="text-[11px] text-[#5C454B] dark:text-gray-400 mt-0.5">
+            <p className="text-[13px] font-medium text-[#5C454B] dark:text-gray-400 mt-0.5">
               {card.label}
             </p>
           </div>
@@ -171,14 +171,14 @@ export function HousekeepingBoard() {
                       <span className="font-semibold text-sm">
                         {room.roomNumber ? `Room ${room.roomNumber}` : "Suite"}
                       </span>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[13px] capitalize text-muted-foreground">
                         {room.category} · {room.status}
                       </span>
                     </div>
                   </TableCell>
                   <TableCell>
                     <span
-                      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium capitalize ${housekeepingVariant(room.housekeepingStatus)}`}
+                      className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-[13px] font-medium capitalize ${housekeepingVariant(room.housekeepingStatus)}`}
                     >
                       {room.housekeepingStatus || "clean"}
                     </span>
@@ -186,13 +186,13 @@ export function HousekeepingBoard() {
                   <TableCell className="text-sm">
                     {room.assignedHousekeeper || <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-[13px] text-muted-foreground">
                     {formatTime(room.housekeepingStartedAt)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="text-[13px] text-muted-foreground">
                     {formatTime(room.housekeepingUpdatedAt)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate">
+                  <TableCell className="text-[13px] text-muted-foreground max-w-[200px] truncate">
                     {room.housekeepingNotes || <span>—</span>}
                   </TableCell>
                   <TableCell className="text-right">
@@ -226,13 +226,13 @@ export function HousekeepingBoard() {
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Sparkles className="size-8 text-muted-foreground mb-2" />
           <p className="text-sm text-muted-foreground">No rooms found.</p>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Add rooms to start tracking housekeeping.
           </p>
         </div>
       )}
 
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
         <ShieldCheck className="size-3.5" />
         Status changes are audited and notified in real time.
         <Ban className="size-3.5 mx-1" />

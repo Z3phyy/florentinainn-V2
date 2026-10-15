@@ -271,7 +271,7 @@ export default function Page() {
           >
             {data.forecast.months.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
-                A forecast needs at least 10 bookings across 3 months in the selected range.
+                A forecast needs at least {data.dataQuality.minBookings ?? 10} bookings across {data.dataQuality.minMonths ?? 3} month(s) in the selected range.
               </p>
             ) : (
               <>
