@@ -128,7 +128,7 @@ export default function Page() {
           <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
             Suites & Room Inventory
           </h1>
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
             Manage unit numbers, pricing folios, promotional discounts, and photo galleries.
           </p>
         </div>
@@ -139,7 +139,7 @@ export default function Page() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search unit # or category..."
-              className="pl-9 pr-8 h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] text-xs"
+              className="pl-9 pr-8 h-10 rounded-xl bg-white dark:bg-[#1A0E13] border-[#D9C3C3] text-sm"
             />
             {searchQuery && (
               <button
@@ -188,17 +188,17 @@ export default function Page() {
                     <div>
                       <div className="flex items-center gap-1.5">
                         {room.roomNumber ? (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-bold bg-primary/10 text-primary border border-primary/20">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-primary/10 text-primary border border-primary/20">
                             Room {room.roomNumber}
                           </span>
                         ) : null}
                         <span className="font-semibold text-sm text-foreground">{room.category}</span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground">Max {room.maxHead || 2} guests</p>
+                      <p className="text-[13px] text-muted-foreground">Max {room.maxHead || 2} guests</p>
                     </div>
                   </div>
                 </TableCell>
-                <TableCell><span className="font-medium">₱{room.price.toLocaleString()}</span></TableCell>
+                <TableCell><span className="font-semibold tabular-nums">₱{room.price.toLocaleString()}</span></TableCell>
                 <TableCell>
                   {room.discount > 0 ? (
                     <span className="text-destructive font-medium">-{room.discount}%</span>
@@ -207,17 +207,17 @@ export default function Page() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${statusVariant(room.status)}`}>
+                  <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-[13px] font-medium capitalize ${statusVariant(room.status)}`}>
                     {room.status.charAt(0).toUpperCase() + room.status.slice(1)}
                   </span>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-1 max-w-[250px]">
                     {room.amenities?.slice(0, 3).map((amenity) => (
-                      <span key={amenity} className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium">{amenity}</span>
+                      <span key={amenity} className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-[13px] font-medium">{amenity}</span>
                     ))}
                     {room.amenities?.length > 3 && (
-                      <span className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">+{room.amenities.length - 3}</span>
+                      <span className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-[13px] text-muted-foreground">+{room.amenities.length - 3}</span>
                     )}
                   </div>
                 </TableCell>
@@ -272,7 +272,7 @@ export default function Page() {
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className="text-sm text-muted-foreground">No rooms found.</p>
-          <p className="text-xs text-muted-foreground mt-1">Add your first room to get started.</p>
+          <p className="text-[13px] text-muted-foreground mt-1">Add your first room to get started.</p>
         </div>
       )}
 

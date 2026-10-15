@@ -141,7 +141,7 @@ export default function Page() {
         <h2 className="font-serif text-xl font-bold text-[#130005] dark:text-white">
           Failed to load dashboard data
         </h2>
-        <p className="text-xs text-[#5C454B] dark:text-gray-400">
+        <p className="text-sm text-[#5C454B] dark:text-gray-400">
           Please check your network connection and try again.
         </p>
       </div>
@@ -153,21 +153,21 @@ export default function Page() {
       {/* ── Page Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#D9C3C3] dark:border-white/10">
         <div>
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3 py-0.5 text-[11px] font-bold text-[#900546] dark:text-[#F968AC] mb-1.5">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-[#900546]/30 bg-[#900546]/10 px-3 py-1 text-xs font-semibold text-[#900546] dark:text-[#F968AC] mb-1.5">
             <Sparkles className="size-3.5" />
             Florentina Inn Front Desk Operations
           </div>
-          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-[#130005] dark:text-white">
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
             Staff Dashboard
           </h1>
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
             Live overview of suite availability, guest arrivals, and front desk workflows.
           </p>
         </div>
       </div>
 
       {/* ── Stat Cards Grid ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 2xl:grid-cols-8 gap-3">
         <StatCard
           icon={<Building2 className="size-4" />}
           label="Total Suites"
@@ -223,10 +223,10 @@ export default function Page() {
         {/* 1. Room Status Distribution */}
         <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-5 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-serif text-sm font-bold text-[#130005] dark:text-white">
+            <h3 className="font-serif text-base font-bold text-[#130005] dark:text-white">
               Room Status
             </h3>
-            <span className="text-[10px] font-bold text-[#618685]">Live Capacity</span>
+            <span className="text-xs font-semibold text-[#618685]">Live Capacity</span>
           </div>
           <div className="flex items-center gap-3">
             <div className="size-24 shrink-0">
@@ -252,12 +252,12 @@ export default function Page() {
             </div>
             <div className="flex-1 space-y-1.5 min-w-0">
               {roomStatusData.map((d) => (
-                <div key={d.name} className="flex items-center justify-between text-xs">
+                <div key={d.name} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div className="size-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-                    <span className="text-[#5C454B] dark:text-gray-400 text-[11px] truncate">{d.name}</span>
+                    <span className="text-[#5C454B] dark:text-gray-400 text-[13px] truncate">{d.name}</span>
                   </div>
-                  <span className="font-bold text-[#130005] dark:text-white tabular-nums text-xs">{d.value}</span>
+                  <span className="font-bold text-[#130005] dark:text-white tabular-nums text-sm">{d.value}</span>
                 </div>
               ))}
             </div>
@@ -267,15 +267,15 @@ export default function Page() {
         {/* 2. Occupancy by Room Category */}
         <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-5 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-serif text-sm font-bold text-[#130005] dark:text-white">
+            <h3 className="font-serif text-base font-bold text-[#130005] dark:text-white">
               Occupancy by Suites
             </h3>
-            <span className="text-[10px] font-bold text-[#900546] dark:text-[#F968AC]">
+            <span className="text-xs font-semibold text-[#900546] dark:text-[#F968AC]">
               {occupiedRooms}/{totalRooms} In-House
             </span>
           </div>
           {occupancyByCategory.length === 0 ? (
-            <div className="h-[95px] flex items-center justify-center text-xs text-[#5C454B] dark:text-gray-400">
+            <div className="h-[95px] flex items-center justify-center text-sm text-[#5C454B] dark:text-gray-400">
               No occupied suites yet.
             </div>
           ) : (
@@ -289,14 +289,14 @@ export default function Page() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#D9C3C3" opacity={0.3} vertical={false} />
                   <XAxis
                     dataKey="name"
-                    tick={{ fontSize: 9, fill: "#5C454B" }}
+                    tick={{ fontSize: 11, fill: "#5C454B" }}
                     axisLine={false}
                     tickLine={false}
                     interval={0}
                   />
                   <YAxis
                     allowDecimals={false}
-                    tick={{ fontSize: 9, fill: "#5C454B" }}
+                    tick={{ fontSize: 11, fill: "#5C454B" }}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -314,10 +314,10 @@ export default function Page() {
         {/* 3. Arrivals Forecast */}
         <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-5 shadow-xs space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-serif text-sm font-bold text-[#130005] dark:text-white">
+            <h3 className="font-serif text-base font-bold text-[#130005] dark:text-white">
               Arrivals Forecast
             </h3>
-            <span className="text-[10px] font-bold text-[#618685]">Next 7 Days</span>
+            <span className="text-xs font-semibold text-[#618685]">Next 7 Days</span>
           </div>
           <div className="h-[95px]">
 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 320, height: 95 }}>
@@ -329,14 +329,14 @@ export default function Page() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#D9C3C3" opacity={0.3} vertical={false} />
                 <XAxis
                   dataKey="name"
-                  tick={{ fontSize: 9, fill: "#5C454B" }}
+                  tick={{ fontSize: 11, fill: "#5C454B" }}
                   axisLine={false}
                   tickLine={false}
                   interval={0}
                 />
                 <YAxis
                   allowDecimals={false}
-                  tick={{ fontSize: 9, fill: "#5C454B" }}
+                  tick={{ fontSize: 11, fill: "#5C454B" }}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -353,12 +353,12 @@ export default function Page() {
         {/* 4. Today's Front Desk */}
         <div className="rounded-3xl border border-[#D9C3C3] dark:border-white/10 bg-white dark:bg-[#1A0E13] p-5 shadow-xs space-y-3 flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <h3 className="font-serif text-sm font-bold text-[#130005] dark:text-white">
+            <h3 className="font-serif text-base font-bold text-[#130005] dark:text-white">
               Today's Front Desk
             </h3>
             <CalendarCheck className="size-4 text-[#900546] dark:text-[#F968AC]" />
           </div>
-          <div className="space-y-2 text-xs">
+          <div className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-[#5C454B] dark:text-gray-400">Today's Arrivals</span>
               <span className="font-bold text-[#900546] dark:text-[#F968AC]">{todayArrivals}</span>
@@ -400,10 +400,10 @@ function StatCard({
       <div className="flex items-center gap-2.5">
         <div className={`rounded-xl p-2 shrink-0 ${color}`}>{icon}</div>
         <div className="min-w-0">
-          <p className="text-base font-bold text-[#130005] dark:text-white tabular-nums leading-none">
+          <p className="text-xl font-bold text-[#130005] dark:text-white tabular-nums leading-none">
             {value}
           </p>
-          <p className="text-[10px] font-medium text-[#5C454B] dark:text-gray-400 mt-1 truncate">
+          <p className="text-xs font-medium text-[#5C454B] dark:text-gray-400 mt-1 truncate">
             {label}
           </p>
         </div>

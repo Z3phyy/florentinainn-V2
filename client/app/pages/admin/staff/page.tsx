@@ -183,7 +183,7 @@ export default function Page() {
           <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white">
             Staff Management
           </h1>
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-0.5">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1">
             Manage accounts, permissions, access codes, and staff lifecycle (active, suspended, revoked).
           </p>
         </div>
@@ -250,21 +250,21 @@ export default function Page() {
                   <TableCell className="text-muted-foreground">
                     {staff.email}
                     {staff.position ? (
-                      <span className="block text-xs">{staff.position}</span>
+                      <span className="block text-[13px]">{staff.position}</span>
                     ) : null}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
-                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] font-medium ${badge.cls}`}>
                         {badge.label}
                       </span>
                       {statusKey === "suspended" && staff.suspensionReason ? (
-                        <span className="max-w-[180px] truncate text-[11px] text-muted-foreground" title={staff.suspensionReason}>
+                        <span className="max-w-[200px] truncate text-[13px] text-muted-foreground" title={staff.suspensionReason}>
                           {staff.suspensionReason}
                         </span>
                       ) : null}
                       {statusKey !== "rejected" && !staff.hasAccessCode ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-amber-700 dark:text-amber-400">
                           <KeyRound className="size-3" />
                           No access code
                         </span>
@@ -274,12 +274,12 @@ export default function Page() {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {staff.permisions.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-sm text-muted-foreground">—</span>
                       ) : (
                         staff.permisions.map((perm) => (
                           <span
                             key={perm}
-                            className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium"
+                            className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-[13px] font-medium capitalize"
                           >
                             {perm}
                           </span>
@@ -287,7 +287,7 @@ export default function Page() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell className="text-[13px] text-muted-foreground">
                     {staff.lastLogin
                       ? new Date(staff.lastLogin).toLocaleString()
                       : "Never"}
@@ -413,7 +413,7 @@ export default function Page() {
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <p className="text-sm text-muted-foreground">No staff found.</p>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-[13px] text-muted-foreground mt-1">
             Adjust filters or add staff to get started.
           </p>
         </div>
@@ -421,8 +421,8 @@ export default function Page() {
 
       {/* Pagination */}
       {rows.length > 0 && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
             Showing {rows.length} of {listTotal} staff
           </p>
           <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ export default function Page() {
             >
               <ChevronLeft className="size-4" />
             </Button>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               Page {page} / {Math.max(1, totalPages)}
             </span>
             <Button

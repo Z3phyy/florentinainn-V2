@@ -29,6 +29,9 @@ export interface forecastResult {
         completeMonths: number;
         monthsWithBookings: number;
         totalBookings: number;
+        minMonths: number;
+        minBookings: number;
+        includesCurrentMonth: boolean;
         confidence: forecastConfidence;
         notes: string[];
     };

@@ -72,7 +72,7 @@ export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
           variant="outline"
           size="sm"
           onClick={() => setOpen(true)}
-          className="h-7 px-2 text-[11px] gap-1 font-medium"
+          className="h-8 px-2.5 text-[13px] gap-1 font-medium"
           title="Restore refunded payment"
         >
           <Undo2 className="size-3 text-muted-foreground" />
@@ -83,7 +83,7 @@ export function RefundPaymentModal({ payment }: { payment: paymentInterface }) {
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-[11px] gap-1 font-medium"
+            className="h-8 px-2.5 text-[13px] gap-1 font-medium"
             title="Record a refund for this payment"
           >
             <RotateCcw className="size-3 text-destructive" />

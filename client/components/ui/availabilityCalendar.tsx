@@ -151,7 +151,7 @@ export function AvailabilityCalendar() {
       return (
         <div
           className={
-            "flex items-center justify-center h-7 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 transition-colors hover:bg-amber-500/25" +
+            "flex items-center justify-center h-8 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 transition-colors hover:bg-amber-500/25" +
             (isToday ? " ring-2 ring-[#900546]/40" : "") +
             (isPast ? " opacity-40" : "")
           }
@@ -191,7 +191,7 @@ export function AvailabilityCalendar() {
       return (
         <div
           className={
-            "flex h-7 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
+            "flex h-8 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
             (isToday ? " ring-2 ring-[#900546]/50" : "")
           }
           title={
@@ -201,13 +201,13 @@ export function AvailabilityCalendar() {
           }
         >
           <div
-            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            className="flex flex-1 items-center justify-center text-white text-[10px] font-bold"
             style={{ backgroundColor: "#9e938f" }}
           >
             OUT
           </div>
           <div
-            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            className="flex flex-1 items-center justify-center text-white text-[10px] font-bold"
             style={{ backgroundColor: inboundColor }}
           >
             {inboundLabel}
@@ -220,14 +220,14 @@ export function AvailabilityCalendar() {
       return (
         <div
           className={
-            "flex h-7 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
+            "flex h-8 items-stretch gap-px rounded-md overflow-hidden cursor-default" +
             (isToday ? " ring-2 ring-[#900546]/50" : "") +
             (isPast ? " opacity-60" : "")
           }
           title={`Check-out on ${key}\n${departures.map(describe).join(", ")}\nRoom is free from this day.`}
         >
           <div
-            className="flex flex-1 items-center justify-center text-white text-[9px] font-bold"
+            className="flex flex-1 items-center justify-center text-white text-[10px] font-bold"
             style={{ backgroundColor: "#9e938f" }}
           >
             OUT
@@ -243,7 +243,7 @@ export function AvailabilityCalendar() {
       if (isToday && room.status === "occupied") {
         return (
           <div
-            className="flex items-center justify-center gap-0.5 h-7 rounded-md text-white text-[10px] font-bold bg-[#61868580]"
+            className="flex items-center justify-center gap-0.5 h-8 rounded-md text-white text-[11px] font-bold bg-[#61868580]"
             title="Occupied — no active booking record"
           >
             <span>IN</span>
@@ -254,7 +254,7 @@ export function AvailabilityCalendar() {
       if (isToday && room.status === "reserved") {
         return (
           <div
-            className="flex items-center justify-center gap-0.5 h-7 rounded-md text-white text-[10px] font-bold bg-[#90054680]"
+            className="flex items-center justify-center gap-0.5 h-8 rounded-md text-white text-[11px] font-bold bg-[#90054680]"
             title="Reserved — no upcoming booking record"
           >
             <span>RSV</span>
@@ -265,7 +265,7 @@ export function AvailabilityCalendar() {
       return (
         <div
           className={
-            "h-7 rounded-md transition-colors" +
+            "h-8 rounded-md transition-colors" +
             (isToday
               ? " bg-[#900546]/10 ring-2 ring-[#900546]/40"
               : isPast
@@ -303,7 +303,7 @@ export function AvailabilityCalendar() {
     return (
       <div
         className={
-          "flex items-center justify-center gap-0.5 h-7 rounded-md text-white text-[10px] font-bold cursor-default transition-transform hover:scale-105" +
+          "flex items-center justify-center gap-0.5 h-8 rounded-md text-white text-[11px] font-bold cursor-default transition-transform hover:scale-105" +
           (isToday ? " ring-2 ring-[#900546]/50" : "")
         }
         style={{ backgroundColor: color }}
@@ -324,9 +324,9 @@ export function AvailabilityCalendar() {
             Occupancy Overview
           </h1>
 
-          <h1 className="text-2xl mt-2 font-semibold">Calendar</h1>
+          <h1 className="font-serif text-3xl font-bold tracking-tight text-[#130005] dark:text-white mt-2">Calendar</h1>
 
-          <p className="text-xs text-[#5C454B] dark:text-gray-400 mt-2">
+          <p className="text-sm text-[#5C454B] dark:text-gray-400 mt-1 max-w-3xl">
             Daily room status. Markers show reservations (RSV), checked-in
             guests (IN), held nights (STAY) and check-outs (OUT). A split cell
             means a same-day turnover — one guest checks out and the next checks
@@ -345,7 +345,7 @@ export function AvailabilityCalendar() {
           <button
             onClick={goToToday}
             disabled={isCurrentMonth}
-            className="inline-flex items-center gap-1.5 px-4 h-9 rounded-xl bg-[#900546] hover:bg-[#720336] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-4 h-9 rounded-xl bg-[#900546] hover:bg-[#720336] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors cursor-pointer"
           >
             <CalendarIcon className="size-3.5" />
             Today
@@ -365,7 +365,7 @@ export function AvailabilityCalendar() {
         <h2 className="font-serif text-2xl font-bold text-[#130005] dark:text-white">
           {MONTH_NAMES[month]} {year}
         </h2>
-        <span className="text-xs text-[#5C454B] dark:text-gray-400">
+        <span className="text-sm text-[#5C454B] dark:text-gray-400">
           <strong className="text-[#900546] dark:text-[#F968AC]">
             {monthArrivals}
           </strong>{" "}
@@ -430,7 +430,7 @@ export function AvailabilityCalendar() {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-[11px] text-[#5C454B] dark:text-gray-400">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-[#5C454B] dark:text-gray-400">
         <span className="inline-flex items-center gap-1.5">
           <span
             className="size-3 rounded-sm"
@@ -479,7 +479,7 @@ export function AvailabilityCalendar() {
       </div>
 
       {todayArrivals.length > 0 && (
-        <div className="flex items-center gap-3 rounded-xl border border-[#900546]/20 bg-[#900546]/5 px-4 py-3 text-xs text-[#900546] dark:text-[#F968AC]">
+        <div className="flex items-center gap-3 rounded-xl border border-[#900546]/20 bg-[#900546]/5 px-4 py-3 text-sm text-[#900546] dark:text-[#F968AC]">
           <Clock className="size-4 shrink-0" />
           <span>
             <strong>{todayArrivals.length}</strong> arrival
@@ -492,10 +492,10 @@ export function AvailabilityCalendar() {
       {/* Calendar Table */}
       <div className="rounded-2xl border border-border bg-card shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-xs min-w-[1240px]">
+          <table className="w-full border-collapse text-sm min-w-[1400px]">
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-left text-[11px] uppercase tracking-wider text-muted-foreground font-bold w-44">
+                <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2.5 text-left text-xs uppercase tracking-wider text-muted-foreground font-bold w-52">
                   Room / Suite
                 </th>
                 {days.map((d) => {
@@ -517,12 +517,12 @@ export function AvailabilityCalendar() {
                           : " text-muted-foreground")
                       }
                     >
-                      <span className="block text-[9px] font-medium opacity-70">
+                      <span className="block text-[11px] font-medium opacity-80">
                         {WEEKDAYS[date.getDay()]}
                       </span>
                       <span
                         className={
-                          "block text-[11px] font-bold" +
+                          "block text-[13px] font-bold" +
                           (isToday ? " text-[#900546] dark:text-[#F968AC]" : "")
                         }
                       >
@@ -557,7 +557,7 @@ export function AvailabilityCalendar() {
                     key={room._id}
                     className={ri % 2 === 1 ? "bg-muted/30" : ""}
                   >
-                    <td className="sticky left-0 z-10 bg-card px-3 py-1.5 border-b border-border/60">
+                    <td className="sticky left-0 z-10 bg-card px-3 py-2 border-b border-border/60">
                       <div className="flex items-center gap-1.5">
                         <CircleDot
                           className="size-2.5 shrink-0"
@@ -575,7 +575,7 @@ export function AvailabilityCalendar() {
                           </span>
                         </p>
                       </div>
-                      <p className="text-[10px] text-muted-foreground pl-4">
+                      <p className="text-xs text-muted-foreground pl-4">
                         ₱{room.price.toLocaleString()}/day
                         {room.discount > 0 ? ` · ${room.discount}% off` : ""}
                       </p>
